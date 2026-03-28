@@ -85,6 +85,7 @@ export async function POST(request: Request) {
 
   const client = new ConvexHttpClient(convexUrl);
 
+  // Each POST creates a new Convex job id — there is no reuse/cache by PDF content.
   let convexJobId: Id<"jobs">;
   try {
     convexJobId = await client.mutation(api.jobs.createJob, {
@@ -149,12 +150,14 @@ export async function POST(request: Request) {
           retractionDate?: string;
           retractionCountry?: string;
           retractionJournal?: string;
+          cascadeVia?: string;
         } = { citationId: citationId as Id<"citations"> };
 
         if (typeof u.status === "string") patch.status = u.status;
         if (typeof u.doi === "string") patch.doi = u.doi;
         if (typeof u.title === "string") patch.title = u.title;
         if (typeof u.authors === "string") patch.authors = u.authors;
+        if (typeof u.cascadeVia === "string") patch.cascadeVia = u.cascadeVia;
 
         const ret = u.retraction;
         if (ret && typeof ret === "object") {

@@ -11,7 +11,10 @@ import {
   calculateIntegrityScore as scoreFromScoringTable,
   type Citation as ScoringCitation,
 } from "./scoring";
-import { getReferences } from "./semanticScholar";
+import {
+  getReferences,
+  type GetReferencesResult as ScholarRefsResult,
+} from "./semanticScholar";
 import type {
   PipelineCitation,
   PipelineUpdateFns,
@@ -57,12 +60,18 @@ export async function isRetractedWrapper(
   }
 }
 
-export async function getReferencesWrapper(doi: string): Promise<ReferenceRow[]> {
+export async function getReferencesWrapper(
+  doi: string,
+): Promise<ScholarRefsResult> {
   try {
-    const rows = await getReferences(doi);
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+    return await getReferences(doi);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[pipeline] getReferencesWrapper unexpected error", {
+      doi,
+      message,
+    });
+    return { ok: false, message: `Unexpected: ${message}` };
   }
 }
 
@@ -265,27 +274,67 @@ export async function runPipeline(
         status: c.status,
       });
 
-      const refs = await getReferencesWrapper(c.doi);
+      const scholar = await getReferencesWrapper(c.doi);
+
+      if (!scholar.ok) {
+        c.references = [];
+        c.status = "cascade-unknown";
+        c.cascadeVia =
+          "Semantic Scholar reference list could not be loaded; cascade status unknown.";
+        console.log("[pipeline] cascade-unknown (API did not return usable data)", {
+          citationId: c.id,
+          paperTitle: c.title,
+          doi: c.doi,
+          message: scholar.message,
+          rateLimited: scholar.rateLimited,
+          statusCode: scholar.statusCode,
+        });
+        await emitCitation("cascade_unknown", {
+          id: c.id,
+          status: c.status,
+          cascadeVia: c.cascadeVia,
+        });
+        continue;
+      }
+
+      const refs = scholar.references;
       c.references = refs;
 
       let cascaded = false;
+      let cascadeViaRef: ReferenceRow | null = null;
       for (const ref of refs) {
         const refRet = await isRetractedWrapper(ref.doi);
         if (refRet) {
           cascaded = true;
+          cascadeViaRef = ref;
           break;
         }
       }
 
       if (cascaded) {
         c.status = "cascade";
+        const viaLabel =
+          cascadeViaRef?.title?.trim() ||
+          cascadeViaRef?.doi ||
+          "retracted upstream reference";
+        c.cascadeVia = viaLabel;
+        console.log("[pipeline] cascade detected", {
+          citationId: c.id,
+          paperTitle: c.title,
+          citingDoi: c.doi,
+          upstreamRetractedDoi: cascadeViaRef?.doi,
+          upstreamTitle: cascadeViaRef?.title,
+          refsChecked: refs.length,
+        });
         await emitCitation("cascade", {
           id: c.id,
           references: refs,
           status: c.status,
+          cascadeVia: c.cascadeVia,
         });
       } else {
         c.status = "clean";
+        c.cascadeVia = undefined;
         await emitCitation("no_cascade", { id: c.id, status: c.status });
       }
     } catch {
@@ -330,7 +379,8 @@ export async function runPipeline(
   const hist = compareToHistoricalCases(
     citations.map((c) => ({
       retracted: c.status === "retracted",
-      cascade: c.status === "cascade",
+      cascade:
+        c.status === "cascade" || c.status === "cascade-unknown",
     })),
     integrityScore,
   );

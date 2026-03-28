@@ -25,12 +25,16 @@ export function HistoricalComparison({ comparison }: Props) {
   if (!rec) {
     return (
       <div className="rounded-2xl border border-slate-700/50 bg-slate-900/40 p-5 backdrop-blur-md">
-        <h3 className="text-sm font-semibold text-slate-300">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
           Historical comparison
         </h3>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          No historical comparison payload on this job yet.
-        </p>
+        <div className="mt-4 space-y-2">
+          <div className="rw-shimmer h-4 w-40 rounded-md bg-slate-700/60" />
+          <div className="rw-shimmer h-3.5 w-52 rounded bg-slate-700/40" />
+          <div className="rw-shimmer h-3 w-44 rounded bg-slate-700/30" />
+          <div className="rw-shimmer h-3 w-36 rounded bg-slate-700/20" />
+        </div>
+        <p className="mt-3 text-xs text-blue-300/80">Analyzing…</p>
       </div>
     );
   }
@@ -54,8 +58,11 @@ export function HistoricalComparison({ comparison }: Props) {
       <h3 className="relative text-xs font-semibold uppercase tracking-[0.18em] text-red-300/90">
         Historical risk comparison
       </h3>
-      <p className="relative mt-3 text-base font-semibold text-white">
-        {similarity ?? "—"}{" "}
+      <p className="relative mt-3 text-sm text-red-100/90">
+        Profile similarity:{" "}
+        <strong className="text-white">{similarity ?? "—"}</strong>
+      </p>
+      <p className="relative mt-2 text-base font-semibold leading-snug text-white">
         <span className="text-red-200">{matchedCase ?? "—"}</span>
       </p>
       <p className="relative mt-2 text-sm text-red-100/85">
@@ -66,8 +73,8 @@ export function HistoricalComparison({ comparison }: Props) {
         to surface in peer review.
       </p>
       {impact ? (
-        <p className="relative mt-3 border-l-2 border-red-400/50 pl-3 text-xs italic text-red-200/80">
-          “{impact}”
+        <p className="relative mt-3 border-l-2 border-red-400/50 pl-3 text-sm leading-relaxed text-red-100/90">
+          {impact}
         </p>
       ) : null}
     </div>

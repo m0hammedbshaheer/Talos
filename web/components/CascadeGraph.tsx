@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo, useState, useCallback } from "react";
+import type { ReactNode } from "react";
 import type { CitationRow } from "@/lib/citationRow";
 
 type Props = {
@@ -7,240 +9,811 @@ type Props = {
   highlightId: string | null;
 };
 
-/** SVG network — tolerates missing or partial rows. */
+const SUMMARY_THRESHOLD = 10;
+
+/** Graph layout: ~2× prior spacing (no d3 in project — approximates larger collide radius). */
+const COLS_FLAG = 2;
+const MARGIN_X = 24;
+const ROW_STEP_FLAG = 68;
+const NODE_W_FLAG = 156;
+const NODE_H_FLAG = 58;
+const HUB_BOTTOM = 58;
+const DOT_R = 4;
+const DOT_GAP = 22;
+
+type LegendKey = "clean" | "retracted" | "cascade" | "unverified";
+
+type BandStyle = {
+  fill: string;
+  stroke: string;
+  text: string;
+  subtext: string;
+  bus: string;
+  drop: string;
+};
+
+const STYLES: Record<string, BandStyle> = {
+  retracted: {
+    fill: "fill-red-950/80",
+    stroke: "stroke-red-400/55",
+    text: "fill-red-50",
+    subtext: "fill-red-200/80",
+    bus: "rgba(248,113,113,0.35)",
+    drop: "rgba(248,113,113,0.32)",
+  },
+  cascade: {
+    fill: "fill-orange-950/80",
+    stroke: "stroke-orange-400/50",
+    text: "fill-orange-50",
+    subtext: "fill-orange-200/75",
+    bus: "rgba(251,146,60,0.32)",
+    drop: "rgba(251,146,60,0.28)",
+  },
+  clean: {
+    fill: "fill-emerald-950/55",
+    stroke: "stroke-emerald-500/40",
+    text: "fill-emerald-50",
+    subtext: "fill-emerald-200/70",
+    bus: "rgba(52,211,153,0.22)",
+    drop: "rgba(148,163,184,0.22)",
+  },
+  unverified: {
+    fill: "fill-amber-950/65",
+    stroke: "stroke-amber-400/45",
+    text: "fill-amber-50",
+    subtext: "fill-amber-200/75",
+    bus: "rgba(251,191,36,0.28)",
+    drop: "rgba(251,191,36,0.24)",
+  },
+  other: {
+    fill: "fill-slate-800/70",
+    stroke: "stroke-slate-500/45",
+    text: "fill-slate-100",
+    subtext: "fill-slate-400",
+    bus: "rgba(148,163,184,0.2)",
+    drop: "rgba(148,163,184,0.18)",
+  },
+};
+
+type RowKind = keyof typeof STYLES;
+
+function rowKind(status: string): RowKind {
+  if (status === "retracted") return "retracted";
+  if (status === "cascade" || status === "cascade-unknown") return "cascade";
+  if (status === "clean") return "clean";
+  if (status === "unverified") return "unverified";
+  return "other";
+}
+
+function legendKeyForRow(status: string): LegendKey | "other" {
+  const k = rowKind(status);
+  if (k === "other") return "other";
+  return k as LegendKey;
+}
+
+function passesLegendFilter(status: string, filters: Record<LegendKey, boolean>): boolean {
+  const lk = legendKeyForRow(status);
+  if (lk === "other") return filters.unverified;
+  return filters[lk];
+}
+
+/** Two lines at word boundaries when possible. */
+function titleTwoLines(raw: string, lineMax = 36): [string, string] {
+  const t = (raw ?? "").trim() || "—";
+  if (t.length <= lineMax) return [t, ""];
+  const slice = t.slice(0, lineMax + 12);
+  let cut = slice.lastIndexOf(" ", lineMax);
+  if (cut < lineMax * 0.45) cut = lineMax;
+  const a = t.slice(0, cut).trim();
+  let b = t.slice(cut).trim();
+  if (b.length > lineMax) b = `${b.slice(0, lineMax - 1)}…`;
+  return [a, b];
+}
+
+function truncateOneLine(raw: string, max = 80): string {
+  const t = (raw ?? "").trim() || "—";
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+/** Visible label for cascade upstream title (contamination map). */
+function truncateVia(raw: string | null | undefined, max = 40): string {
+  const t = (raw ?? "").trim();
+  if (!t) return "—";
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+function originLine(c: CitationRow, kind: "retracted" | "cascade"): string {
+  if (kind === "retracted") {
+    const country = c.retractionCountry?.trim() || "—";
+    const reason = c.retractionReason?.trim() || "Retraction recorded";
+    return `${country} · ${reason}`;
+  }
+  const country = c.retractionCountry?.trim() || "—";
+  const via = c.cascadeVia?.trim() || "Downstream of retracted literature";
+  return `${country} · ${via}`;
+}
+
+type PlacedFlagged = {
+  citation: CitationRow;
+  x: number;
+  y: number;
+  kind: "retracted" | "cascade";
+};
+
+type PlacedDot = {
+  citation: CitationRow;
+  x: number;
+  y: number;
+  kind: RowKind;
+};
+
+function layoutFlaggedBand(
+  items: { citation: CitationRow; kind: "retracted" | "cascade" }[],
+  startY: number,
+  viewW: number,
+  hubCx: number,
+): { nodes: PlacedFlagged[]; bandBottom: number; busY: number; busLeft: number; busRight: number } {
+  const innerW = viewW - 2 * MARGIN_X;
+  const cellW = innerW / COLS_FLAG;
+  const busY = startY - 8;
+  const nodes: PlacedFlagged[] = items.map(({ citation, kind }, i) => {
+    const col = i % COLS_FLAG;
+    const row = Math.floor(i / COLS_FLAG);
+    const x = MARGIN_X + col * cellW + cellW / 2;
+    const y = startY + row * ROW_STEP_FLAG;
+    return { citation, x, y, kind };
+  });
+  const xs = nodes.map((n) => n.x);
+  const busLeft = Math.min(...xs, hubCx) - 12;
+  const busRight = Math.max(...xs, hubCx) + 12;
+  const rows = Math.ceil(items.length / COLS_FLAG) || 1;
+  const bandBottom = startY + rows * ROW_STEP_FLAG + 8;
+  return { nodes, bandBottom, busY, busLeft, busRight };
+}
+
+function layoutDots(
+  items: CitationRow[],
+  kinds: RowKind[],
+  startY: number,
+  viewW: number,
+): { dots: PlacedDot[]; bottom: number } {
+  if (items.length === 0) return { dots: [], bottom: startY };
+  const perRow = Math.max(1, Math.floor((viewW - 2 * MARGIN_X) / DOT_GAP));
+  const dots: PlacedDot[] = [];
+  items.forEach((citation, i) => {
+    const row = Math.floor(i / perRow);
+    const col = i % perRow;
+    const rowW = Math.min(perRow, items.length - row * perRow) * DOT_GAP;
+    const offsetX = (viewW - rowW) / 2 + DOT_GAP / 2;
+    const x = offsetX + col * DOT_GAP;
+    const y = startY + row * DOT_GAP;
+    dots.push({ citation, x, y, kind: kinds[i]! });
+  });
+  const rows = Math.ceil(items.length / perRow);
+  return { dots, bottom: startY + rows * DOT_GAP + 12 };
+}
+
+const DEFAULT_FILTERS: Record<LegendKey, boolean> = {
+  clean: true,
+  retracted: true,
+  cascade: true,
+  unverified: true,
+};
+
+function LegendBar(props: {
+  counts: Record<LegendKey, number>;
+  filters: Record<LegendKey, boolean>;
+  onToggle: (k: LegendKey) => void;
+}) {
+  const { counts, filters, onToggle } = props;
+  const chips: { key: LegendKey; dot: string; label: string }[] = [
+    { key: "clean", dot: "🟢", label: "Clean" },
+    { key: "retracted", dot: "🔴", label: "Retracted" },
+    { key: "cascade", dot: "🟠", label: "Cascade" },
+    { key: "unverified", dot: "⚪", label: "Unverified" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-4 py-3">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        Filter
+      </span>
+      {chips.map(({ key, dot, label }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onToggle(key)}
+          className={`rounded-lg border px-2.5 py-1 text-left text-[11px] transition-colors ${
+            filters[key]
+              ? "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
+              : "border-white/5 bg-transparent text-slate-500 opacity-60 line-through decoration-slate-500"
+          }`}
+          aria-pressed={filters[key]}
+        >
+          <span className="mr-1">{dot}</span>
+          {label}{" "}
+          <span className="text-slate-400">({counts[key]})</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SummaryView(props: {
+  clean: CitationRow[];
+  retracted: CitationRow[];
+  cascade: CitationRow[];
+  unverified: CitationRow[];
+  filters: Record<LegendKey, boolean>;
+  onToggle: (k: LegendKey) => void;
+}) {
+  const { clean, retracted, cascade, unverified, filters, onToggle } = props;
+
+  const flaggedRows = useMemo(() => {
+    const rows: { c: CitationRow; kind: "retracted" | "cascade" }[] = [];
+    if (filters.retracted) retracted.forEach((c) => rows.push({ c, kind: "retracted" }));
+    if (filters.cascade) cascade.forEach((c) => rows.push({ c, kind: "cascade" }));
+    return rows;
+  }, [retracted, cascade, filters.retracted, filters.cascade]);
+
+  const counts: Record<LegendKey, number> = {
+    clean: clean.length,
+    retracted: retracted.length,
+    cascade: cascade.length,
+    unverified: unverified.length,
+  };
+
+  return (
+    <>
+      <div className="grid gap-3 p-4 sm:grid-cols-3">
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/40 px-4 py-4">
+          <div className="text-2xl">🟢</div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-100">
+            {clean.length}
+          </div>
+          <div className="text-xs font-medium text-emerald-200/80">Clean</div>
+        </div>
+        <div className="rounded-xl border border-red-500/30 bg-red-950/45 px-4 py-4">
+          <div className="text-2xl">🔴</div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-red-100">
+            {retracted.length}
+          </div>
+          <div className="text-xs font-medium text-red-200/80">Retracted</div>
+        </div>
+        <div className="rounded-xl border border-orange-500/30 bg-orange-950/40 px-4 py-4">
+          <div className="text-2xl">🟠</div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-orange-100">
+            {cascade.length}
+          </div>
+          <div className="text-xs font-medium text-orange-200/80">Cascade</div>
+        </div>
+      </div>
+
+      <div className="px-4 pb-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          Flagged citations
+        </h3>
+        {flaggedRows.length === 0 ? (
+          <p className="mt-2 text-xs text-slate-500">
+            No flagged citations match the current filters.
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {flaggedRows.map(({ c, kind }) => (
+              <li
+                key={c.id}
+                className={`rounded-lg border border-white/10 bg-slate-900/50 py-2.5 pl-3 pr-3 ${
+                  kind === "retracted"
+                    ? "border-l-4 border-l-red-500"
+                    : "border-l-4 border-l-orange-500"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                      kind === "retracted"
+                        ? "bg-red-500/20 text-red-200"
+                        : "bg-orange-500/20 text-orange-200"
+                    }`}
+                  >
+                    {kind === "retracted" ? "Retracted" : "Cascade"}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm font-medium leading-snug text-slate-100">
+                  {truncateOneLine(c.title, 100)}
+                </p>
+                {kind === "cascade" ? (
+                  <p
+                    className="mt-1 text-[10px] text-slate-500"
+                    title={
+                      c.cascadeVia?.trim()
+                        ? `Via: ${c.cascadeVia.trim()}`
+                        : undefined
+                    }
+                  >
+                    Via: {truncateVia(c.cascadeVia, 40)}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-[11px] text-slate-400">
+                  <span className="text-slate-500">Origin: </span>
+                  {originLine(c, kind)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <p className="mt-4 text-center text-[11px] text-slate-500">
+          {clean.length} clean {clean.length === 1 ? "citation" : "citations"} not shown — view in
+          citation feed
+        </p>
+      </div>
+
+      <LegendBar counts={counts} filters={filters} onToggle={onToggle} />
+    </>
+  );
+}
+
+function listSecondaryLine(c: CitationRow): string {
+  const k = rowKind(c.status);
+  if (k === "retracted")
+    return originLine(c, "retracted");
+  if (k === "cascade") return originLine(c, "cascade");
+  if (k === "unverified" || k === "other")
+    return "Metadata or DOI could not be fully verified";
+  return "No integrity flags";
+}
+
+function SmallCitationList(props: {
+  citations: CitationRow[];
+  filters: Record<LegendKey, boolean>;
+}) {
+  const rows = useMemo(
+    () => props.citations.filter((c) => passesLegendFilter(c.status, props.filters)),
+    [props.citations, props.filters],
+  );
+
+  if (rows.length === 0) {
+    return (
+      <p className="px-4 py-6 text-center text-xs text-slate-500">
+        No citations match the current filters.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="max-h-[min(420px,55vh)] space-y-2 overflow-y-auto px-4 py-3">
+      {rows.map((c) => {
+        const k = rowKind(c.status);
+        const border =
+          k === "retracted"
+            ? "border-l-red-500"
+            : k === "cascade"
+              ? "border-l-orange-500"
+              : k === "unverified" || k === "other"
+                ? "border-l-amber-500/80"
+                : "border-l-emerald-600/70";
+        const badge =
+          k === "retracted"
+            ? "bg-red-500/20 text-red-200"
+            : k === "cascade"
+              ? "bg-orange-500/20 text-orange-200"
+              : k === "unverified" || k === "other"
+                ? "bg-amber-500/20 text-amber-200"
+                : "bg-emerald-500/15 text-emerald-200";
+        const label =
+          k === "retracted"
+            ? "Retracted"
+            : k === "cascade"
+              ? "Cascade"
+              : k === "unverified"
+                ? "Unverified"
+                : k === "other"
+                  ? "Other"
+                  : "Clean";
+        return (
+          <li
+            key={c.id}
+            className={`rounded-lg border border-white/10 border-l-4 bg-slate-900/50 py-2.5 pl-3 pr-3 ${border}`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${badge}`}
+              >
+                {label}
+              </span>
+            </div>
+            <p className="mt-1 text-sm font-medium leading-snug text-slate-100">
+              {truncateOneLine(c.title, 96)}
+            </p>
+            {k === "cascade" ? (
+              <p
+                className="mt-1 text-[10px] text-slate-500"
+                title={
+                  c.cascadeVia?.trim() ? `Via: ${c.cascadeVia.trim()}` : undefined
+                }
+              >
+                Via: {truncateVia(c.cascadeVia, 40)}
+              </p>
+            ) : null}
+            <p className="mt-1 text-[11px] text-slate-400">
+              <span className="text-slate-500">Origin: </span>
+              {listSecondaryLine(c)}
+            </p>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function CompactGraphView(props: {
+  retracted: CitationRow[];
+  cascade: CitationRow[];
+  clean: CitationRow[];
+  unverified: CitationRow[];
+  other: CitationRow[];
+  filters: Record<LegendKey, boolean>;
+  highlightId: string | null;
+}) {
+  const { retracted, cascade, clean, unverified, other, filters, highlightId } = props;
+
+  const { viewW, viewH, hubCx, flagged, dots, dotsLabelY } = useMemo(() => {
+    const viewW = 560;
+    const hubCx = viewW / 2;
+
+    const flaggedItems: { citation: CitationRow; kind: "retracted" | "cascade" }[] = [];
+    if (filters.retracted) retracted.forEach((c) => flaggedItems.push({ citation: c, kind: "retracted" }));
+    if (filters.cascade) cascade.forEach((c) => flaggedItems.push({ citation: c, kind: "cascade" }));
+
+    const dotItems: CitationRow[] = [];
+    const dotKinds: RowKind[] = [];
+    const pushDots = (arr: CitationRow[], kind: RowKind) => {
+      arr.forEach((c) => {
+        dotItems.push(c);
+        dotKinds.push(kind);
+      });
+    };
+    if (filters.clean) pushDots(clean, "clean");
+    if (filters.unverified) {
+      pushDots(unverified, "unverified");
+      pushDots(other, "other");
+    }
+
+    const startFlaggedY = 96;
+    let cursorY = startFlaggedY;
+    let busGeom: {
+      busY: number;
+      busLeft: number;
+      busRight: number;
+      nodes: PlacedFlagged[];
+    } | null = null;
+
+    if (flaggedItems.length > 0) {
+      const laid = layoutFlaggedBand(flaggedItems, cursorY, viewW, hubCx);
+      busGeom = {
+        busY: laid.busY,
+        busLeft: laid.busLeft,
+        busRight: laid.busRight,
+        nodes: laid.nodes,
+      };
+      cursorY = laid.bandBottom + 20;
+    }
+
+    const dotsLabelY = cursorY - 10;
+    const { dots: placedDots, bottom } = layoutDots(dotItems, dotKinds, cursorY, viewW);
+    const footerPad = 20;
+    const viewH = Math.max(200, bottom + footerPad);
+
+    return {
+      viewW,
+      viewH,
+      hubCx,
+      flagged: busGeom,
+      dots: placedDots,
+      dotsLabelY,
+    };
+  }, [retracted, cascade, clean, unverified, other, filters]);
+
+  const segs: ReactNode[] = [];
+  if (flagged && flagged.nodes.length > 0) {
+    segs.push(
+      <line
+        key="spine"
+        x1={hubCx}
+        y1={HUB_BOTTOM}
+        x2={hubCx}
+        y2={flagged.busY}
+        stroke="rgba(148,163,184,0.4)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />,
+    );
+    segs.push(
+      <line
+        key="bus"
+        x1={flagged.busLeft}
+        y1={flagged.busY}
+        x2={flagged.busRight}
+        y2={flagged.busY}
+        stroke="rgba(251,191,36,0.35)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />,
+    );
+    flagged.nodes.forEach((n) => {
+      const st = STYLES[n.kind];
+      const midY = n.y + NODE_H_FLAG / 2;
+      const hi = highlightId === n.citation.id;
+      segs.push(
+        <line
+          key={`drop-${n.citation.id}`}
+          x1={n.x}
+          y1={flagged.busY}
+          x2={n.x}
+          y2={midY}
+          stroke={st.drop}
+          strokeWidth={hi ? 2.4 : 1.5}
+          strokeLinecap="round"
+          opacity={hi ? 1 : 0.92}
+        />,
+      );
+    });
+  }
+
+  return (
+    <div className="relative overflow-auto p-2 sm:p-4">
+      <svg
+        viewBox={`0 0 ${viewW} ${viewH}`}
+        className="min-h-[280px] w-full"
+        preserveAspectRatio="xMidYMin meet"
+        role="img"
+        aria-label="Citation contamination graph"
+      >
+        <defs>
+          <filter id="cg-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="5" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="cg-node-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow
+              dx="0"
+              dy="1"
+              stdDeviation="2"
+              floodColor="#000"
+              floodOpacity="0.35"
+            />
+          </filter>
+        </defs>
+
+        <g filter="url(#cg-node-shadow)">
+          <rect
+            x={hubCx - 72}
+            y="10"
+            width="144"
+            height="48"
+            rx="14"
+            className="fill-amber-50/[0.12] stroke-amber-200/55"
+            strokeWidth="1.5"
+          />
+          <text
+            x={hubCx}
+            y="38"
+            textAnchor="middle"
+            className="fill-amber-50 text-[12px] font-semibold"
+          >
+            Your manuscript
+          </text>
+        </g>
+
+        <g>{segs}</g>
+
+        {flagged && flagged.nodes.length > 0 ? (
+          <text
+            x={MARGIN_X}
+            y={flagged.busY - 14}
+            className="fill-slate-400 text-[9px] font-semibold uppercase tracking-[0.12em]"
+          >
+            Flagged ({flagged.nodes.length})
+          </text>
+        ) : null}
+
+        {dots.length > 0 ? (
+          <text
+            x={MARGIN_X}
+            y={dotsLabelY}
+            className="fill-slate-500 text-[9px] font-semibold uppercase tracking-[0.12em]"
+          >
+            Other citations ({dots.length})
+          </text>
+        ) : null}
+
+        {dots.map((d) => (
+          <circle
+            key={`dot-${d.citation.id}`}
+            cx={d.x}
+            cy={d.y}
+            r={highlightId === d.citation.id ? DOT_R + 1.5 : DOT_R}
+            className="fill-slate-500/55 stroke-slate-400/35"
+            strokeWidth="0.75"
+          />
+        ))}
+
+        {flagged
+          ? flagged.nodes.map((n) => {
+              const st = STYLES[n.kind];
+              const cid = n.citation.id;
+              const hi = highlightId === cid;
+              const nx = n.x - NODE_W_FLAG / 2;
+              const [line1, line2] = titleTwoLines(n.citation.title);
+              const viaFull = (n.citation.cascadeVia ?? "").trim();
+              const viaTip = viaFull ? `Via: ${viaFull}` : "Via: unknown upstream";
+              return (
+                <g key={cid} filter={hi ? "url(#cg-glow)" : "url(#cg-node-shadow)"}>
+                  {n.kind === "cascade" ? <title>{viaTip}</title> : null}
+                  <rect
+                    x={nx}
+                    y={n.y}
+                    width={NODE_W_FLAG}
+                    height={NODE_H_FLAG}
+                    rx="10"
+                    className={`${st.fill} ${st.stroke}`}
+                    strokeWidth={hi ? 2 : 1.2}
+                  />
+                  <text
+                    x={n.x}
+                    y={n.y + 14}
+                    textAnchor="middle"
+                    className={`${st.text} text-[8.5px] leading-tight`}
+                  >
+                    {line1}
+                  </text>
+                  {line2 ? (
+                    <text
+                      x={n.x}
+                      y={n.y + 25}
+                      textAnchor="middle"
+                      className={`${st.text} text-[8.5px] leading-tight`}
+                    >
+                      {line2}
+                    </text>
+                  ) : null}
+                  {n.kind === "cascade" ? (
+                    <text
+                      x={n.x}
+                      y={n.y + (line2 ? 36 : 28)}
+                      textAnchor="middle"
+                      className="fill-orange-200/75 text-[6.5px] leading-tight"
+                    >
+                      {`Via: ${truncateVia(n.citation.cascadeVia, 40)}`}
+                    </text>
+                  ) : null}
+                  <text
+                    x={n.x}
+                    y={n.y + (n.kind === "cascade" ? 50 : 46)}
+                    textAnchor="middle"
+                    className={`${st.subtext} text-[7px] font-bold uppercase tracking-wide`}
+                  >
+                    {n.kind === "retracted" ? "Retracted" : "CASCADE"}
+                  </text>
+                </g>
+              );
+            })
+          : null}
+      </svg>
+    </div>
+  );
+}
+
 export function CascadeGraph({ citations, highlightId }: Props) {
   const list = citations ?? [];
-  const retracted = list.filter((c) => c?.status === "retracted");
-  const cascade = list.filter((c) => c?.status === "cascade");
-  const clean = list.filter((c) => c?.status === "clean");
+  const [panel, setPanel] = useState<"graph" | "list">("graph");
+  const [filters, setFilters] = useState<Record<LegendKey, boolean>>(() => ({
+    ...DEFAULT_FILTERS,
+  }));
 
-  const hubY = 108;
+  const toggleFilter = useCallback((k: LegendKey) => {
+    setFilters((f) => ({ ...f, [k]: !f[k] }));
+  }, []);
+
+  const { retracted, cascade, clean, unverified, other } = useMemo(() => {
+    const r: CitationRow[] = [];
+    const c: CitationRow[] = [];
+    const cl: CitationRow[] = [];
+    const u: CitationRow[] = [];
+    const o: CitationRow[] = [];
+    for (const row of list) {
+      const s = row?.status ?? "";
+      if (s === "retracted") r.push(row);
+      else if (s === "cascade" || s === "cascade-unknown") c.push(row);
+      else if (s === "clean") cl.push(row);
+      else if (s === "unverified") u.push(row);
+      else o.push(row);
+    }
+    return { retracted: r, cascade: c, clean: cl, unverified: u, other: o };
+  }, [list]);
+
+  const legendCounts: Record<LegendKey, number> = useMemo(
+    () => ({
+      clean: clean.length,
+      retracted: retracted.length,
+      cascade: cascade.length,
+      unverified: unverified.length + other.length,
+    }),
+    [clean, retracted, cascade, unverified, other],
+  );
+
+  const isSummary = list.length > SUMMARY_THRESHOLD;
 
   return (
     <div className="flex h-full min-h-[420px] flex-col rounded-2xl border border-white/10 bg-slate-950/50 backdrop-blur-md">
       <div className="border-b border-white/10 p-4">
-        <h2 className="text-sm font-semibold text-white">
-          Contamination map
-        </h2>
+        <h2 className="text-sm font-semibold text-white">Contamination map</h2>
         <p className="text-xs text-slate-400">
-          Your paper → citations → retracted upstream (illustrative layout)
+          {isSummary
+            ? "Summary for large reference lists — key counts and flagged items only."
+            : "Hub links only to retracted or cascade citations; other references appear as dots."}
         </p>
-        <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-slate-400">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" /> Clean
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-orange-400" /> Cascade
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-red-400" /> Retracted
-          </span>
-        </div>
+        {!isSummary && list.length > 0 ? (
+          <div className="mt-3 inline-flex rounded-lg border border-white/10 bg-slate-900/60 p-0.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setPanel("graph")}
+              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+                panel === "graph"
+                  ? "bg-white/10 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Graph view
+            </button>
+            <button
+              type="button"
+              onClick={() => setPanel("list")}
+              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+                panel === "list"
+                  ? "bg-white/10 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              List view
+            </button>
+          </div>
+        ) : null}
       </div>
-      <div className="relative flex-1 overflow-hidden p-2 sm:p-4">
-        <svg
-          viewBox="0 0 400 260"
-          className="h-full w-full max-h-[320px]"
-          role="img"
-          aria-label="Citation contamination graph"
-        >
-          <defs>
-            <linearGradient id="rw-edge" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="rgba(148,163,184,0.35)" />
-              <stop offset="100%" stopColor="rgba(248,113,113,0.5)" />
-            </linearGradient>
-            <filter id="rw-glow" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="4" result="b" />
-              <feMerge>
-                <feMergeNode in="b" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
 
-          <g>
-            <rect
-              x="148"
-              y="8"
-              width="104"
-              height="36"
-              rx="10"
-              className="fill-blue-500/20 stroke-blue-400/50"
-              strokeWidth="1"
-            />
-            <text
-              x="200"
-              y="30"
-              textAnchor="middle"
-              className="fill-slate-100 text-[11px] font-semibold"
-            >
-              Your manuscript
-            </text>
-          </g>
+      {list.length === 0 ? (
+        <p className="flex-1 px-4 py-8 text-center text-sm text-slate-500">No citations yet.</p>
+      ) : isSummary ? (
+        <SummaryView
+          clean={clean}
+          retracted={retracted}
+          cascade={cascade}
+          unverified={unverified}
+          filters={filters}
+          onToggle={toggleFilter}
+        />
+      ) : panel === "graph" ? (
+        <CompactGraphView
+          retracted={retracted}
+          cascade={cascade}
+          clean={clean}
+          unverified={unverified}
+          other={other}
+          filters={filters}
+          highlightId={highlightId}
+        />
+      ) : (
+        <SmallCitationList citations={list} filters={filters} />
+      )}
 
-          {clean.slice(0, 3).map((c, i) => {
-            const x = 80 + i * 90;
-            const cid = c?.id ?? `c-${i}`;
-            return (
-              <line
-                key={cid}
-                x1="200"
-                y1="44"
-                x2={x}
-                y2={hubY - 24}
-                stroke="rgba(148,163,184,0.25)"
-                strokeWidth="1.5"
-              />
-            );
-          })}
-
-          {retracted[0] ? (
-            <line
-              x1="200"
-              y1="44"
-              x2="320"
-              y2={hubY - 24}
-              stroke="url(#rw-edge)"
-              strokeWidth="2"
-              strokeDasharray="4 3"
-            />
-          ) : null}
-
-          {cascade[0] && retracted[0] ? (
-            <>
-              <path
-                d="M 200 44 Q 160 90 120 120"
-                fill="none"
-                stroke="rgba(251,146,60,0.55)"
-                strokeWidth="2"
-              />
-              <line
-                x1="120"
-                y1="120"
-                x2="300"
-                y2="150"
-                stroke="rgba(248,113,113,0.45)"
-                strokeWidth="2"
-                strokeDasharray="3 3"
-              />
-            </>
-          ) : null}
-
-          {clean.slice(0, 3).map((c, i) => {
-            const x = 56 + i * 90;
-            const cid = c?.id ?? `n-${i}`;
-            const hi = highlightId === cid;
-            return (
-              <g key={cid} filter={hi ? "url(#rw-glow)" : undefined}>
-                <rect
-                  x={x - 36}
-                  y={hubY - 24}
-                  width="72"
-                  height="28"
-                  rx="8"
-                  className={
-                    hi
-                      ? "fill-emerald-500/25 stroke-emerald-300/60"
-                      : "fill-emerald-950/40 stroke-emerald-500/30"
-                  }
-                  strokeWidth="1.2"
-                />
-                <text
-                  x={x}
-                  y={hubY - 6}
-                  textAnchor="middle"
-                  className="fill-emerald-100 text-[9px]"
-                >
-                  Clean
-                </text>
-              </g>
-            );
-          })}
-
-          {retracted[0] ? (
-            <g
-              filter={
-                highlightId === (retracted[0]?.id ?? "")
-                  ? "url(#rw-glow)"
-                  : ""
-              }
-            >
-              <rect
-                x="272"
-                y={hubY - 28}
-                width="96"
-                height="36"
-                rx="10"
-                className="fill-red-950/70 stroke-red-400/60"
-                strokeWidth="1.5"
-              />
-              <text
-                x="320"
-                y={hubY - 12}
-                textAnchor="middle"
-                className="fill-red-100 text-[9px] font-semibold"
-              >
-                Direct retraction
-              </text>
-            </g>
-          ) : null}
-
-          {cascade[0] ? (
-            <g
-              filter={
-                highlightId === (cascade[0]?.id ?? "") ? "url(#rw-glow)" : ""
-              }
-            >
-              <rect
-                x="72"
-                y="112"
-                width="96"
-                height="36"
-                rx="10"
-                className="fill-orange-950/70 stroke-orange-400/55"
-                strokeWidth="1.5"
-              />
-              <text
-                x="120"
-                y="132"
-                textAnchor="middle"
-                className="fill-orange-100 text-[9px] font-semibold"
-              >
-                Cascade hit
-              </text>
-            </g>
-          ) : null}
-
-          {retracted[0] ? (
-            <g>
-              <circle
-                cx="320"
-                cy="190"
-                r="22"
-                className="fill-red-600/30 stroke-red-400/80"
-                strokeWidth="2"
-                filter="url(#rw-glow)"
-              />
-              <text
-                x="320"
-                y="194"
-                textAnchor="middle"
-                className="fill-red-50 text-[9px] font-bold"
-              >
-                RW
-              </text>
-              <text
-                x="200"
-                y="236"
-                textAnchor="middle"
-                className="fill-slate-500 text-[9px]"
-              >
-                Retracted source in Retraction Watch DB (conceptual)
-              </text>
-            </g>
-          ) : null}
-        </svg>
-      </div>
+      {!isSummary && list.length > 0 ? (
+        <LegendBar counts={legendCounts} filters={filters} onToggle={toggleFilter} />
+      ) : null}
     </div>
   );
 }

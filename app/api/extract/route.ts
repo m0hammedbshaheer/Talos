@@ -1,10 +1,11 @@
 // DOCUMENTATION NOTE:
 // This endpoint extracts references from PDFs and converts them into structured citations.
-// It accepts an uploaded PDF, pulls bibliography text, and asks GPT-4o to return a JSON list of citations.
+// It accepts an uploaded PDF, pulls bibliography text, and asks an OpenAI-compatible LLM for JSON citations.
 
+import { loadLlmExtractConfig } from "@/lib/llmExtractConfig";
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-import pdfParse from "pdf-parse";
+import OpenAI, { APIError } from "openai";
+import { PDFParse } from "pdf-parse";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,18 @@ function stripMarkdownFences(raw: string): string {
   return s.trim();
 }
 
+function jsonErrorBody(
+  error: string,
+  status: number,
+  detail?: string,
+): NextResponse {
+  const body: { error: string; detail?: string } = { error };
+  if (process.env.NODE_ENV === "development" && detail) {
+    body.detail = detail;
+  }
+  return NextResponse.json(body, { status });
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -45,9 +58,37 @@ export async function POST(request: Request) {
       );
     }
 
+    const llm = loadLlmExtractConfig();
+    if (!llm.ok) {
+      return jsonErrorBody(llm.error, 503);
+    }
+    const {
+      apiKey,
+      baseURL,
+      model,
+      jsonMode,
+      maxCompletionTokens,
+      reasoningEffort,
+    } = llm.config;
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    const pdfData = await pdfParse(buffer);
-    const text = (pdfData.text ?? "").trim();
+    let text: string;
+    try {
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const pdfData = await parser.getText();
+        text = (pdfData.text ?? "").trim();
+      } finally {
+        await parser.destroy();
+      }
+    } catch (pdfErr) {
+      console.error("[extract] pdf-parse failed", pdfErr);
+      return jsonErrorBody(
+        "Could not read this PDF. Try another file or a text-based (not scanned) PDF.",
+        400,
+        pdfErr instanceof Error ? pdfErr.message : String(pdfErr),
+      );
+    }
 
     if (text.length < MIN_TEXT_LEN) {
       return NextResponse.json(
@@ -66,42 +107,74 @@ export async function POST(request: Request) {
     }
     bibliographyText = bibliographyText.slice(0, BIB_MAX_CHARS);
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error("OPENAI_API_KEY is not configured");
+    const openai = new OpenAI({ apiKey, baseURL });
+    let rawContent: string | null;
+    try {
+      const completion = await openai.chat.completions.create({
+        model,
+        temperature: 0,
+        max_completion_tokens: maxCompletionTokens,
+        ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
+        ...(reasoningEffort
+          ? { reasoning_effort: reasoningEffort }
+          : {}),
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `Extract all references from this bibliography:\n\n${bibliographyText}`,
+          },
+        ],
+      });
+      rawContent = completion.choices[0]?.message?.content ?? null;
+    } catch (openaiErr) {
+      console.error("[extract] LLM request failed", openaiErr);
+      if (openaiErr instanceof APIError) {
+        return jsonErrorBody(
+          openaiErr.message ||
+            "The LLM API returned an error. Check your key, model name, and provider dashboard.",
+          openaiErr.status && openaiErr.status >= 400 && openaiErr.status < 600
+            ? openaiErr.status
+            : 502,
+          openaiErr.message,
+        );
+      }
+      return jsonErrorBody(
+        "The citation extraction service failed. Try again in a moment.",
+        502,
+        openaiErr instanceof Error ? openaiErr.message : String(openaiErr),
+      );
     }
 
-    const openai = new OpenAI({ apiKey });
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Extract all references from this bibliography:\n\n${bibliographyText}`,
-        },
-      ],
-    });
-
-    const rawContent = completion.choices[0]?.message?.content;
     if (!rawContent) {
-      throw new Error("Empty OpenAI response");
+      return jsonErrorBody("Empty response from the model.", 502);
     }
 
-    const jsonStr = stripMarkdownFences(rawContent);
-    const parsed = JSON.parse(jsonStr) as { citations?: unknown };
+    let parsed: { citations?: unknown };
+    try {
+      const jsonStr = stripMarkdownFences(rawContent);
+      parsed = JSON.parse(jsonStr) as { citations?: unknown };
+    } catch (parseErr) {
+      console.error("[extract] JSON parse failed", parseErr, rawContent.slice(0, 500));
+      return jsonErrorBody(
+        "The model returned invalid JSON. Try again or use a smaller PDF.",
+        502,
+        parseErr instanceof Error ? parseErr.message : String(parseErr),
+      );
+    }
+
     const citations = Array.isArray(parsed.citations) ? parsed.citations : [];
 
     return NextResponse.json({
       citations,
       totalFound: citations.length,
     });
-  } catch {
-    return NextResponse.json(
-      { error: "An unexpected error occurred while processing the PDF." },
-      { status: 500 },
+  } catch (e) {
+    console.error("[extract] unexpected", e);
+    return jsonErrorBody(
+      "An unexpected error occurred while processing the PDF.",
+      500,
+      e instanceof Error ? e.message : String(e),
     );
   }
 }

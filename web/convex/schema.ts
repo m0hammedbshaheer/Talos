@@ -28,4 +28,13 @@ export default defineSchema({
     cascadeDepth: v.optional(v.number()),
     cascadeVia: v.optional(v.string()),
   }).index("by_job", ["jobId"]),
+
+  replacements: defineTable({
+    citationId: v.id("citations"),
+    title: v.string(),
+    url: v.string(),
+    summary: v.string(),
+    publishedDate: v.string(),
+    relevanceScore: v.number(),
+  }).index("by_citation", ["citationId"]),
 });

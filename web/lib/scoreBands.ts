@@ -4,7 +4,7 @@ export function getScoreLabel(score: number) {
       label: "CLEAN",
       color: "#34d399",
       description:
-        "No retraction contamination detected in this mock bibliography.",
+        "No retraction contamination detected in your bibliography.",
     };
   }
   if (score >= 70) {

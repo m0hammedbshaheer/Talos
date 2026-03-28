@@ -211,8 +211,6 @@ body {
   }
 }
 
-/* ── Demo preview frame — animated gradient border ── */
-/* Uses @property to animate a conic-gradient angle (Chrome 85+, FF 128+, Safari 16.4+) */
 @property --rw-demo-angle {
   syntax: "<angle>";
   initial-value: 0deg;
@@ -247,13 +245,6 @@ body {
   overflow: hidden;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .rw-demo-frame {
-    animation: none;
-    background: rgba(96, 165, 250, 0.18);
-  }
-}
-
 .rw-stat-pill {
   transition:
     box-shadow 0.25s ease,
@@ -267,10 +258,46 @@ body {
   background-color: rgba(255, 255, 255, 0.07);
 }
 
+@keyframes rw-step-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.7;
+  }
+}
+
+.rw-step-pulse {
+  animation: rw-step-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rw-step-done {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.rw-step-done {
+  animation: rw-step-done 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rw-shimmer,
   .rw-glow-pulse,
-  .rw-float {
+  .rw-float,
+  .rw-step-pulse,
+  .rw-step-done {
     animation: none;
   }
 
@@ -278,6 +305,11 @@ body {
   .rw-landing-aurora::after,
   .rw-landing-orb {
     animation: none;
+  }
+
+  .rw-demo-frame {
+    animation: none;
+    background: rgba(96, 165, 250, 0.18);
   }
 }
 

@@ -29,7 +29,9 @@ export function calculateDownstreamRisk(citations: Citation[]): DownstreamRisk {
       (c) =>
         c &&
         typeof c === "object" &&
-        (c.status === "retracted" || c.status === "cascade"),
+        (c.status === "retracted" ||
+          c.status === "cascade" ||
+          c.status === "cascade-unknown"),
     ).length;
 
     if (totalFlagged === 0) {

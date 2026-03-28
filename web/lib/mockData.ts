@@ -1,4 +1,4 @@
-/** Frontend-only demo payloads — swap for Convex/API later without changing UI. */
+﻿/** Frontend-only demo payloads ΓÇö swap for Convex/API later without changing UI. */
 
 export type CitationStatus =
   | "pending"
@@ -86,7 +86,7 @@ export const MOCK_CITATIONS: MockCitation[] = [
     year: 2020,
     doi: "10.1016/S0140-6736(20)31180-6",
     status: "retracted",
-    retractionReason: "Data fabrication — fake patient database",
+    retractionReason: "Data fabrication ΓÇö fake patient database",
     retractionDate: "2020-06-04",
     retractionCountry: "United States",
     retractionJournal: "The Lancet",
