@@ -8,29 +8,63 @@
 ---
 
 # 🟦 PERSON 1 — DATA SPECIALIST
-### Your job: Build the data engine. All files go in `/lib/`. No frontend needed.
+### Your job: Build the data engine. All files go in `mosin_work/lib/` (and scripts under `mosin_work/scripts/`). Data files live in `mosin_work/data/`. No frontend needed.
 
 ---
 
 ## PROMPT 1-A — Project Setup (Do this FIRST, only one person does this)
 
+**Team layout (Person 1 — data specialist):** All app and data paths are under the repo folder `mosin_work/` (not `retractwatch`). Put Retraction Watch CSV at `mosin_work/data/retraction_watch.csv`. Your `lib/` code lives under `mosin_work/lib/`.
+
 ```
 We are building a Next.js app called RetractWatch V2 — a scientific bibliography
 integrity checker. Help me set up the project from scratch.
 
+Our Next.js app root folder is mosin_work (inside the Talos repo). It may already
+contain data/retraction_watch.csv — do not delete it.
+
 Run these commands one by one and confirm each works before the next:
 
-1. npx create-next-app@latest retractwatch
-   - TypeScript = Yes
-   - Tailwind = Yes
-   - App Router = Yes
-   - All other options = No
+1. Open a terminal at the Talos repo root (the folder that contains `mosin_work/`).
 
-2. cd retractwatch
+2. Create the Next.js app in `mosin_work`.
 
-3. npm install convex openai @exa-ai/sdk pdf-parse d3 @types/d3 react-dropzone jspdf papaparse @types/papaparse
+   `create-next-app` **aborts** if the target folder is not empty (e.g. you already
+   have `data/retraction_watch.csv`). Use **2B** in that case — it is the normal
+   path for Person 1. Use **2A** only for a completely empty `mosin_work/`.
 
-4. Create the folder: mkdir data
+   **2A — Empty `mosin_work/` (no `data/` yet, or you are OK moving data aside first):**
+   - cd mosin_work
+   - npx create-next-app@latest .
+   - TypeScript = Yes, Tailwind = Yes, App Router = Yes, other options = No
+   - Non-interactive equivalent (from inside `mosin_work`):
+     npx create-next-app@latest . --typescript --tailwind --app --use-npm --yes
+
+   **2B — `mosin_work` already has `data/` (recommended; keeps CSV in place):**
+   - From Talos repo root (NOT inside `mosin_work` yet):
+     mkdir mosin_work_scaffold
+     cd mosin_work_scaffold
+     npx create-next-app@latest . --typescript --tailwind --app --use-npm --yes
+   - Merge the scaffold into `mosin_work` (existing `data/` stays untouched):
+     - **Windows (PowerShell or cmd, from repo root):**
+       robocopy mosin_work_scaffold mosin_work /E /MOVE
+       (robocopy uses exit codes 0–7 for success; 8+ means failure)
+       If `mosin_work_scaffold` remains, delete it when nothing is locking it:
+       rmdir /s /q mosin_work_scaffold
+     - **macOS / Linux (from repo root):**
+       rsync -a mosin_work_scaffold/ mosin_work/
+       rm -rf mosin_work_scaffold
+   - cd mosin_work
+   - You should now see `package.json`, `app/`, and still `data/retraction_watch.csv`.
+
+   Note: Current Next.js templates may still add ESLint even when you skip extra
+   options; that is fine for the hackathon.
+
+3. npm install convex openai exa-js pdf-parse d3 @types/d3 react-dropzone jspdf papaparse @types/papaparse
+   (Use `exa-js` — the package `@exa-ai/sdk` is not published on npm.)
+
+4. Ensure the folder data exists (mkdir data if missing). Keep your CSV at
+   data/retraction_watch.csv — do not move or rename it unless code expects a new path.
 
 5. Create this file at data/historical_cases.json with exactly this content:
 [
@@ -106,16 +140,16 @@ Run these commands one by one and confirm each works before the next:
   }
 ]
 
-6. Create .env.local and add these lines (I will fill in the keys):
+6. In mosin_work, create .env.local and add these lines (I will fill in the keys):
 OPENAI_API_KEY=sk-your-key-here
 EXA_API_KEY=your-exa-key-here
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
 
-7. Run: npx convex dev
+7. From mosin_work, run: npx convex dev
    This opens a browser — create a free Convex account and link the project.
    Keep this terminal running always.
 
-8. In a second terminal run: npm run dev
+8. In a second terminal, cd mosin_work and run: npm run dev
    The app should open at http://localhost:3000
 
 After each step tell me: what ran, what the output was, and if anything went wrong.

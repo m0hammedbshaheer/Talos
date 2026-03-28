@@ -1,4 +1,22 @@
-node_modules
-.next
-.env*.local
-out
+# Next.js app (web/)
+web/node_modules/
+web/.next/
+web/out/
+
+# Env & secrets
+web/.env
+web/.env*.local
+
+# Logs & debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

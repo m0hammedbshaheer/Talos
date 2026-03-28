@@ -1,0 +1,72 @@
+[
+  {
+    "name": "Wakefield Vaccine-Autism Paper",
+    "journal": "The Lancet",
+    "year": 1998,
+    "retractionYear": 2010,
+    "reason": "Fraud and data fabrication",
+    "citationsAfterRetraction": 881,
+    "totalCitations": 1211,
+    "field": "Medicine",
+    "country": "United Kingdom",
+    "severity": "catastrophic",
+    "impact": "Caused measles outbreaks globally by discouraging vaccination",
+    "avgMonthsToCatch": 144
+  },
+  {
+    "name": "Surgisphere COVID-19 Studies",
+    "journal": "The Lancet / NEJM",
+    "year": 2020,
+    "retractionYear": 2020,
+    "reason": "Data fabrication — fake patient database",
+    "citationsAfterRetraction": 340,
+    "totalCitations": 340,
+    "field": "Medicine / COVID-19",
+    "country": "United States",
+    "severity": "critical",
+    "impact": "Halted global hydroxychloroquine trials, affected WHO policy",
+    "avgMonthsToCatch": 2
+  },
+  {
+    "name": "Stapel Social Psychology Fraud",
+    "journal": "Multiple journals",
+    "year": 2011,
+    "retractionYear": 2011,
+    "reason": "Fabricated data across 58 papers",
+    "citationsAfterRetraction": 2400,
+    "totalCitations": 2400,
+    "field": "Psychology",
+    "country": "Netherlands",
+    "severity": "critical",
+    "impact": "Undermined public trust in social psychology research",
+    "avgMonthsToCatch": 36
+  },
+  {
+    "name": "Hwang Woo-suk Stem Cell Cloning",
+    "journal": "Science",
+    "year": 2004,
+    "retractionYear": 2006,
+    "reason": "Fabricated human stem cell cloning results",
+    "citationsAfterRetraction": 900,
+    "totalCitations": 900,
+    "field": "Stem Cell Biology",
+    "country": "South Korea",
+    "severity": "catastrophic",
+    "impact": "Set stem cell research back by years globally",
+    "avgMonthsToCatch": 24
+  },
+  {
+    "name": "Cornell Food Lab (Wansink)",
+    "journal": "Multiple journals",
+    "year": 2018,
+    "retractionYear": 2018,
+    "reason": "Data manipulation and p-hacking across 13 papers",
+    "citationsAfterRetraction": 3800,
+    "totalCitations": 3800,
+    "field": "Nutrition / Behavioral Science",
+    "country": "United States",
+    "severity": "high",
+    "impact": "Influenced government dietary guidelines and school lunch policies",
+    "avgMonthsToCatch": 48
+  }
+]
