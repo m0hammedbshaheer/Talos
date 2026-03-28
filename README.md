@@ -618,7 +618,45 @@ The scan maps your severity level to the closest documented retraction scandal:
 | Cascade only | Cornell Food Lab (Brian Wansink) | 48 months |
 | Clean | No match | — |
 
----
+----
+
+## How We Used Each Tool
+
+### Convex
+- Used as the real-time backend and state store for long-running analysis jobs.
+- `api/jobs` and `api/citations` tables store job status, per-citation updates, and final score.
+- Frontend results page subscribes to live Convex data for progress and updates.
+- Core usage exists in `web/app/api/check/route.ts`, `web/convex/*.ts`, and `web/app/results/[jobId]/ResultsConvexView.tsx`.
+
+### OpenAI (LLM)
+- Used to extract structured citations from uploaded PDF bibliography text.
+- The extraction route calls an OpenAI-compatible chat endpoint and enforces JSON output:
+  - input: bibliography text from PDF
+  - output: `citations[]` with title/authors/year/doi
+- Core usage exists in `web/app/api/extract/route.ts` and `lib/llmExtractConfig.ts`.
+
+### Exa
+- Used in the pipeline to suggest replacement papers for citations flagged as `retracted` or `cascade`.
+- Integrated in Phase 4 of the analysis pipeline via `findReplacementPapers`.
+- Core usage exists in `web/lib/pipeline.ts` and `web/lib/exa.ts`.
+
+### Vercel / Next.js
+- Frontend is built with Next.js App Router and API routes.
+- Project is ready for Vercel-style deployment of the web app.
+- Local environment uses `.env.local` for runtime configuration.
+
+### Apify
+- Not currently integrated in this codebase.
+- If needed later, we can add it for web scraping/automation data enrichment before citation analysis.
+
+### Mobin (or Mobbin)
+- Not a runtime dependency in this repository.
+- Can be credited as UI inspiration/research only (if used during design ideation).
+
+### v0 (Vercel v0)
+- No direct code-generated artifact from v0 is currently tracked here.
+- If v0 was used for early UI mockups, mention it as prototyping support rather than backend/runtime infra.
+----
 
 ## Deployment
 
