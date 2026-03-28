@@ -1,0 +1,46 @@
+{
+  "name": "mosin_work",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test:db": "tsx scripts/testDatabase.ts",
+    "test:crossref": "tsx scripts/testCrossref.ts",
+    "test:cascade": "tsx scripts/testCascade.ts",
+    "test:scoring": "tsx scripts/testScoring.ts",
+    "test:db:node": "ts-node scripts/testDatabase.ts",
+    "test:crossref:node": "ts-node scripts/testCrossref.ts",
+    "test:cascade:node": "ts-node scripts/testCascade.ts",
+    "test:scoring:node": "ts-node scripts/testScoring.ts"
+  },
+  "dependencies": {
+    "@types/d3": "^7.4.3",
+    "@types/papaparse": "^5.5.2",
+    "convex": "^1.34.1",
+    "d3": "^7.9.0",
+    "exa-js": "^2.10.2",
+    "jspdf": "^4.2.1",
+    "next": "16.2.1",
+    "openai": "^6.33.0",
+    "papaparse": "^5.5.3",
+    "pdf-parse": "^2.4.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-dropzone": "^15.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}
