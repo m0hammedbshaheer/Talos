@@ -1,23 +1,25 @@
 "use client";
 
-import type { MockCitation } from "@/lib/mockData";
-import type { MockJob } from "@/lib/mockData";
+import type { CitationRow } from "@/lib/citationRow";
+import type { JobViewModel } from "@/lib/jobViewModel";
 import { getScoreLabel } from "@/lib/scoreBands";
 
 type Props = {
-  job: MockJob;
-  citations: MockCitation[];
+  job: JobViewModel | null | undefined;
+  citations: CitationRow[] | undefined | null;
 };
 
-/** Print-friendly summary — no extra deps; uses the browser print dialog. */
+/** Print-friendly summary — uses browser print / save as PDF. */
 export function ReportDownload({ job, citations }: Props) {
-  const label = getScoreLabel(job.integrityScore);
+  const list = citations ?? [];
+  const score = job?.integrityScore ?? 0;
+  const label = getScoreLabel(score);
 
   const handlePrint = () => {
-    const rows = citations
+    const rows = list
       .map(
         (c) =>
-          `<tr><td>${escapeHtml(c.title)}</td><td>${escapeHtml(c.status)}</td><td>${escapeHtml(c.doi ?? "—")}</td></tr>`,
+          `<tr><td>${escapeHtml(c?.title ?? "")}</td><td>${escapeHtml(c?.status ?? "")}</td><td>${escapeHtml(c?.doi ?? "—")}</td></tr>`,
       )
       .join("");
 
@@ -32,9 +34,8 @@ export function ReportDownload({ job, citations }: Props) {
         th, td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
         th { background: #f3f4f6; }
       </style></head><body>
-      <h1>RetractWatch — Integrity report (preview)</h1>
-      <p class="meta">Score: <strong>${job.integrityScore}</strong> — ${escapeHtml(label.label)} · ${citations.length} citations · Generated ${new Date().toLocaleString()}</p>
-      <p class="meta">This is a frontend mock. Connect the pipeline for live results.</p>
+      <h1>RetractWatch — Integrity report</h1>
+      <p class="meta">Score: <strong>${score}</strong> — ${escapeHtml(label.label)} · ${list.length} citations · Generated ${new Date().toLocaleString()}</p>
       <table><thead><tr><th>Title</th><th>Status</th><th>DOI</th></tr></thead><tbody>${rows}</tbody></table>
       </body></html>`);
     w.document.close();
@@ -42,12 +43,16 @@ export function ReportDownload({ job, citations }: Props) {
     w.print();
   };
 
+  if (!job && list.length === 0) {
+    return null;
+  }
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/40 px-5 py-4">
       <div>
         <p className="text-sm font-medium text-white">Export report</p>
         <p className="text-xs text-slate-400">
-          Opens a print dialog with a clean table — good for judges and PDF save.
+          Opens a print dialog with a clean table — save as PDF from the dialog.
         </p>
       </div>
       <button

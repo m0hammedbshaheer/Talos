@@ -1,8 +1,8 @@
 type Props = {
-  country: string;
-  journal: string;
-  reason: string;
-  retractionDate: string;
+  country?: string | null;
+  journal?: string | null;
+  reason?: string | null;
+  retractionDate?: string | null;
 };
 
 function reasonClass(reason: string) {
@@ -19,22 +19,32 @@ function reasonClass(reason: string) {
   return "bg-slate-800/90 text-slate-200 ring-white/10";
 }
 
-export function OriginBadge({ country, journal, reason, retractionDate }: Props) {
+export function OriginBadge({
+  country,
+  journal,
+  reason,
+  retractionDate,
+}: Props) {
+  const c = country?.trim() || "Unknown";
+  const j = journal?.trim() || "—";
+  const rs = reason?.trim() || "—";
+  const d = retractionDate?.trim() || "—";
+
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       <span className="inline-flex items-center rounded-lg bg-slate-800/80 px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10">
-        {country}
+        {c}
       </span>
       <span className="inline-flex items-center rounded-lg bg-slate-800/80 px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10">
-        {journal}
+        {j}
       </span>
       <span
-        className={`inline-flex items-center rounded-lg px-2 py-1 text-[11px] font-medium ring-1 ${reasonClass(reason)}`}
+        className={`inline-flex items-center rounded-lg px-2 py-1 text-[11px] font-medium ring-1 ${reasonClass(rs)}`}
       >
-        {reason}
+        {rs}
       </span>
       <span className="inline-flex items-center rounded-lg bg-slate-800/80 px-2 py-1 text-[11px] text-slate-400 ring-1 ring-white/10">
-        Retracted {retractionDate || "—"}
+        Retracted {d}
       </span>
     </div>
   );

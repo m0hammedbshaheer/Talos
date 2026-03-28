@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Instrument_Serif } from "next/font/google";
+import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -30,7 +31,7 @@ export default function RootLayout({
       <body
         className={`${dmSans.variable} ${instrument.variable} rw-bg rw-grid min-h-dvh antialiased`}
       >
-        {children}
+        <ConvexClientProvider>{children}</ConvexClientProvider>
       </body>
     </html>
   );

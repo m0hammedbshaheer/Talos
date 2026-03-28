@@ -5,16 +5,17 @@ import { getScoreLabel } from "@/lib/scoreBands";
 
 type Props = {
   score: number | undefined;
-  status: string;
+  status: string | undefined | null;
 };
 
 export function IntegrityScore({ score, status }: Props) {
   const [display, setDisplay] = useState(0);
   const s = score ?? 0;
   const label = getScoreLabel(s);
+  const st = status ?? "";
 
   useEffect(() => {
-    if (status !== "complete" && score === undefined) {
+    if (st !== "complete" && score === undefined) {
       setDisplay(0);
       return;
     }
@@ -31,7 +32,7 @@ export function IntegrityScore({ score, status }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [score, status]);
+  }, [score, st]);
 
   const r = 52;
   const c = 2 * Math.PI * r;
@@ -86,9 +87,9 @@ export function IntegrityScore({ score, status }: Props) {
           <p className="mt-1 text-sm leading-relaxed text-slate-400">
             {label.description}
           </p>
-          {status !== "complete" && (
+          {st !== "complete" ? (
             <p className="mt-2 text-xs text-blue-300/90">Analyzing…</p>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

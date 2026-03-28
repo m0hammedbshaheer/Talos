@@ -1,17 +1,18 @@
 "use client";
 
-import type { MockCitation } from "@/lib/mockData";
+import type { CitationRow } from "@/lib/citationRow";
 
 type Props = {
-  citations: MockCitation[];
+  citations: CitationRow[] | undefined | null;
   highlightId: string | null;
 };
 
-/** SVG “network” — no D3; tuned for hackathon demo clarity. */
+/** SVG network — tolerates missing or partial rows. */
 export function CascadeGraph({ citations, highlightId }: Props) {
-  const retracted = citations.filter((c) => c.status === "retracted");
-  const cascade = citations.filter((c) => c.status === "cascade");
-  const clean = citations.filter((c) => c.status === "clean");
+  const list = citations ?? [];
+  const retracted = list.filter((c) => c?.status === "retracted");
+  const cascade = list.filter((c) => c?.status === "cascade");
+  const clean = list.filter((c) => c?.status === "clean");
 
   const hubY = 108;
 
@@ -57,7 +58,6 @@ export function CascadeGraph({ citations, highlightId }: Props) {
             </filter>
           </defs>
 
-          {/* Your paper */}
           <g>
             <rect
               x="148"
@@ -78,12 +78,12 @@ export function CascadeGraph({ citations, highlightId }: Props) {
             </text>
           </g>
 
-          {/* Edges from manuscript to layer 1 */}
           {clean.slice(0, 3).map((c, i) => {
             const x = 80 + i * 90;
+            const cid = c?.id ?? `c-${i}`;
             return (
               <line
-                key={c.id}
+                key={cid}
                 x1="200"
                 y1="44"
                 x2={x}
@@ -94,23 +94,19 @@ export function CascadeGraph({ citations, highlightId }: Props) {
             );
           })}
 
-          {/* Retracted direct edge */}
-          {retracted[0] && (
-            <>
-              <line
-                x1="200"
-                y1="44"
-                x2="320"
-                y2={hubY - 24}
-                stroke="url(#rw-edge)"
-                strokeWidth="2"
-                strokeDasharray="4 3"
-              />
-            </>
-          )}
+          {retracted[0] ? (
+            <line
+              x1="200"
+              y1="44"
+              x2="320"
+              y2={hubY - 24}
+              stroke="url(#rw-edge)"
+              strokeWidth="2"
+              strokeDasharray="4 3"
+            />
+          ) : null}
 
-          {/* Cascade path: manuscript → cascade node → retracted */}
-          {cascade[0] && retracted[0] && (
+          {cascade[0] && retracted[0] ? (
             <>
               <path
                 d="M 200 44 Q 160 90 120 120"
@@ -128,14 +124,14 @@ export function CascadeGraph({ citations, highlightId }: Props) {
                 strokeDasharray="3 3"
               />
             </>
-          )}
+          ) : null}
 
-          {/* Layer: sample citations */}
           {clean.slice(0, 3).map((c, i) => {
             const x = 56 + i * 90;
-            const hi = highlightId === c.id;
+            const cid = c?.id ?? `n-${i}`;
+            const hi = highlightId === cid;
             return (
-              <g key={c.id} filter={hi ? "url(#rw-glow)" : undefined}>
+              <g key={cid} filter={hi ? "url(#rw-glow)" : undefined}>
                 <rect
                   x={x - 36}
                   y={hubY - 24}
@@ -161,8 +157,14 @@ export function CascadeGraph({ citations, highlightId }: Props) {
             );
           })}
 
-          {retracted[0] && (
-            <g filter={highlightId === retracted[0].id ? "url(#rw-glow)" : ""}>
+          {retracted[0] ? (
+            <g
+              filter={
+                highlightId === (retracted[0]?.id ?? "")
+                  ? "url(#rw-glow)"
+                  : ""
+              }
+            >
               <rect
                 x="272"
                 y={hubY - 28}
@@ -181,10 +183,14 @@ export function CascadeGraph({ citations, highlightId }: Props) {
                 Direct retraction
               </text>
             </g>
-          )}
+          ) : null}
 
-          {cascade[0] && (
-            <g filter={highlightId === cascade[0].id ? "url(#rw-glow)" : ""}>
+          {cascade[0] ? (
+            <g
+              filter={
+                highlightId === (cascade[0]?.id ?? "") ? "url(#rw-glow)" : ""
+              }
+            >
               <rect
                 x="72"
                 y="112"
@@ -203,10 +209,9 @@ export function CascadeGraph({ citations, highlightId }: Props) {
                 Cascade hit
               </text>
             </g>
-          )}
+          ) : null}
 
-          {/* Root retracted node */}
-          {retracted[0] && (
+          {retracted[0] ? (
             <g>
               <circle
                 cx="320"
@@ -233,7 +238,7 @@ export function CascadeGraph({ citations, highlightId }: Props) {
                 Retracted source in Retraction Watch DB (conceptual)
               </text>
             </g>
-          )}
+          ) : null}
         </svg>
       </div>
     </div>

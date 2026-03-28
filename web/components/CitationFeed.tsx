@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { MockCitation } from "@/lib/mockData";
+import type { CitationRow } from "@/lib/citationRow";
 import { OriginBadge } from "./OriginBadge";
 
 type Props = {
-  citations: MockCitation[];
+  citations: CitationRow[] | undefined | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 };
@@ -19,26 +19,29 @@ const statusStyle: Record<string, string> = {
   unverified: "bg-amber-950/40 text-amber-200 ring-amber-500/25",
 };
 
-function statusLabel(s: string) {
-  if (s === "cascade") return "cascade";
-  return s;
+function statusLabel(s: string | undefined | null) {
+  const v = s ?? "pending";
+  if (v === "cascade") return "cascade";
+  return v;
 }
 
 export function CitationFeed({ citations, selectedId, onSelect }: Props) {
+  const list = useMemo(() => citations ?? [], [citations]);
   const [filter, setFilter] = useState<string | "all">("all");
 
   const counts = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const c of citations) {
-      m[c.status] = (m[c.status] ?? 0) + 1;
+    for (const c of list) {
+      const st = c?.status ?? "pending";
+      m[st] = (m[st] ?? 0) + 1;
     }
     return m;
-  }, [citations]);
+  }, [list]);
 
   const filtered =
     filter === "all"
-      ? citations
-      : citations.filter((c) => c.status === filter);
+      ? list
+      : list.filter((c) => (c?.status ?? "pending") === filter);
 
   return (
     <div className="flex h-full min-h-[420px] flex-col rounded-2xl border border-white/10 bg-[var(--rw-card)] backdrop-blur-md">
@@ -47,13 +50,13 @@ export function CitationFeed({ citations, selectedId, onSelect }: Props) {
           <div>
             <h2 className="text-sm font-semibold text-white">Citation feed</h2>
             <p className="text-xs text-slate-400">
-              Live-style updates · {citations.length} references
+              {list.length} reference{list.length === 1 ? "" : "s"}
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {(
               [
-                ["all", citations.length],
+                ["all", list.length],
                 ["retracted", counts.retracted ?? 0],
                 ["cascade", counts.cascade ?? 0],
                 ["clean", counts.clean ?? 0],
@@ -79,12 +82,17 @@ export function CitationFeed({ citations, selectedId, onSelect }: Props) {
       </div>
       <ul className="custom-scrollbar flex-1 space-y-2 overflow-y-auto p-3 sm:p-4">
         {filtered.map((c, i) => {
-          const active = selectedId === c.id;
+          const id = c?.id ?? `row-${i}`;
+          const st = c?.status ?? "pending";
+          const active = selectedId === id;
+          const pillClass =
+            statusStyle[st] ?? statusStyle.pending;
+
           return (
-            <li key={c.id}>
+            <li key={id}>
               <button
                 type="button"
-                onClick={() => onSelect(active ? null : c.id)}
+                onClick={() => onSelect(active ? null : id)}
                 className={`w-full rounded-xl border text-left transition ${
                   active
                     ? "border-blue-400/50 bg-blue-500/10 shadow-[0_0_24px_rgba(59,130,246,0.12)]"
@@ -101,11 +109,11 @@ export function CitationFeed({ citations, selectedId, onSelect }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span
-                        className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${statusStyle[c.status] ?? statusStyle.pending}`}
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${pillClass}`}
                       >
-                        {statusLabel(c.status)}
+                        {statusLabel(st)}
                       </span>
-                      {c.doi ? (
+                      {c?.doi ? (
                         <span className="truncate font-mono text-[10px] text-slate-500">
                           {c.doi}
                         </span>
@@ -116,33 +124,32 @@ export function CitationFeed({ citations, selectedId, onSelect }: Props) {
                       )}
                     </div>
                     <p className="mt-1.5 text-sm font-medium leading-snug text-slate-100">
-                      {c.title}
+                      {c?.title?.trim() ? c.title : "—"}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {c.authors}
-                      {c.year != null ? ` · ${c.year}` : ""}
+                      {c?.authors?.trim() ? c.authors : "—"}
+                      {c?.year != null ? ` · ${c.year}` : ""}
                     </p>
-                    {(c.status === "retracted" || c.status === "cascade") &&
-                      c.retractionCountry &&
-                      c.retractionJournal && (
-                        <OriginBadge
-                          country={c.retractionCountry}
-                          journal={c.retractionJournal}
-                          reason={
-                            c.retractionReason ||
-                            (c.status === "cascade"
-                              ? "Cascade via retracted upstream"
-                              : "Retracted")
-                          }
-                          retractionDate={c.retractionDate ?? ""}
-                        />
-                      )}
-                    {c.status === "cascade" && c.cascadeVia && (
+                    {(st === "retracted" || st === "cascade") &&
+                    (c?.retractionCountry || c?.retractionJournal) ? (
+                      <OriginBadge
+                        country={c?.retractionCountry}
+                        journal={c?.retractionJournal}
+                        reason={
+                          c?.retractionReason ??
+                          (st === "cascade"
+                            ? "Cascade via retracted upstream"
+                            : "Retracted")
+                        }
+                        retractionDate={c?.retractionDate}
+                      />
+                    ) : null}
+                    {st === "cascade" && c?.cascadeVia ? (
                       <p className="mt-2 text-[11px] text-orange-200/90">
                         Via upstream:{" "}
                         <span className="text-orange-100">{c.cascadeVia}</span>
                       </p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </button>
