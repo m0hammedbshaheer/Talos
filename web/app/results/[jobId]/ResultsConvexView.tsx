@@ -10,15 +10,25 @@ import { jobFromConvexDoc } from "@/lib/jobViewModel";
 type Props = { jobId: string };
 
 export function ResultsConvexView({ jobId }: Props) {
-  const convexJobId = jobId as Id<"jobs">;
+  const args = jobId ? { jobId: jobId as Id<"jobs"> } : "skip";
 
-  const jobDoc = useQuery(api.jobs.getJob, { jobId: convexJobId });
-  const citationsRaw = useQuery(api.citations.getCitationsForJob, {
-    jobId: convexJobId,
-  });
+  const jobDoc = useQuery(api.jobs.getJob, args);
+  const citationsRaw = useQuery(api.citations.getCitationsForJob, args);
 
   const loading =
-    jobDoc === undefined || citationsRaw === undefined;
+    Boolean(jobId) &&
+    (jobDoc === undefined || citationsRaw === undefined);
+
+  if (!jobId) {
+    return (
+      <ResultsLayout
+        jobId=""
+        notFound
+        job={null}
+        citations={[]}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -43,7 +53,7 @@ export function ResultsConvexView({ jobId }: Props) {
   }
 
   const citations = normalizeCitations(citationsRaw ?? []);
-  const job = jobFromConvexDoc(jobDoc);
+  const job = jobFromConvexDoc(jobDoc ?? null);
 
   return (
     <ResultsLayout

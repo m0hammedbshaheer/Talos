@@ -1,19 +1,17 @@
 // DOCUMENTATION NOTE:
-// Full integrity pipeline: mock (USE_MOCKS=true) or real HTTP/Exa adapters.
-// Updates are injected — no console logging and no database imports in this file.
+// Integrity pipeline: CrossRef → Retraction Watch CSV → Semantic Scholar → Exa.
+// Updates are injected (e.g. Convex); no database imports in this module.
 
+import { resolveDoiFromTitle } from "./crossref";
+import { calculateDownstreamRisk } from "./downstreamRisk";
+import { findReplacementPapers } from "./exa";
+import { compareToHistoricalCases } from "./historicalCases";
+import { isRetracted } from "./retractionWatch";
 import {
-  mockFindReplacementPapers,
-  mockGetReferences,
-  mockIsRetracted,
-  mockResolveDoiFromTitle,
-} from "./pipeline-mocks";
-import {
-  realFindReplacementPapers,
-  realGetReferences,
-  realIsRetracted,
-  realResolveDoiFromTitle,
-} from "./pipeline-real";
+  calculateIntegrityScore as scoreFromScoringTable,
+  type Citation as ScoringCitation,
+} from "./scoring";
+import { getReferences } from "./semanticScholar";
 import type {
   PipelineCitation,
   PipelineUpdateFns,
@@ -34,20 +32,16 @@ export type {
 /** @deprecated Use RetractionRecord */
 export type RetractionInfo = RetractionRecord;
 
-const USE_MOCKS = process.env.USE_MOCKS === "true";
-
 // -----------------------------------------------------------------------------
-// Wrappers — single switch for mock vs real; each isolates failures.
+// External adapters (try/catch per call; safe fallbacks)
 // -----------------------------------------------------------------------------
 
 export async function resolveDoiFromTitleWrapper(
   title: string,
+  authors?: string,
 ): Promise<string | null> {
   try {
-    if (USE_MOCKS) {
-      return await mockResolveDoiFromTitle(title);
-    }
-    return await realResolveDoiFromTitle(title);
+    return await resolveDoiFromTitle(title, authors);
   } catch {
     return null;
   }
@@ -57,10 +51,7 @@ export async function isRetractedWrapper(
   doi: string,
 ): Promise<RetractionRecord | null> {
   try {
-    if (USE_MOCKS) {
-      return await mockIsRetracted(doi);
-    }
-    return await realIsRetracted(doi);
+    return isRetracted(doi);
   } catch {
     return null;
   }
@@ -68,10 +59,8 @@ export async function isRetractedWrapper(
 
 export async function getReferencesWrapper(doi: string): Promise<ReferenceRow[]> {
   try {
-    if (USE_MOCKS) {
-      return await mockGetReferences(doi);
-    }
-    return await realGetReferences(doi);
+    const rows = await getReferences(doi);
+    return Array.isArray(rows) ? rows : [];
   } catch {
     return [];
   }
@@ -82,38 +71,60 @@ export async function findReplacementPapersWrapper(
   year: number | string | undefined,
 ): Promise<ReplacementRow[]> {
   try {
-    if (USE_MOCKS) {
-      return await mockFindReplacementPapers(title, year);
-    }
-    return await realFindReplacementPapers(title, year);
+    const q = [title, year].filter((x) => x !== undefined && x !== "").join(" ").trim();
+    if (!q) return [];
+    const rows = await findReplacementPapers(q);
+    return rows.map((r) => ({
+      title: r.title,
+      url: r.url,
+      summary: r.summary,
+      publishedDate: r.publishedDate ?? "",
+      relevanceScore: r.relevanceScore ?? 0,
+    }));
   } catch {
     return [];
   }
 }
 
-// -----------------------------------------------------------------------------
-// Scoring
-// -----------------------------------------------------------------------------
-
-function calculateIntegrityScore(citations: PipelineCitation[]): number {
-  let score = 100;
-  citations.forEach((c) => {
-    if (c.status === "retracted") score -= 15;
-    if (c.status === "cascade") score -= 7;
+function pipelineToScoringCitations(p: PipelineCitation[]): ScoringCitation[] {
+  return p.map((c) => {
+    let year: number | null = null;
+    if (typeof c.year === "number" && !Number.isNaN(c.year)) year = c.year;
+    else if (c.year != null && String(c.year).trim() !== "") {
+      const n = Number(c.year);
+      year = Number.isNaN(n) ? null : n;
+    }
+    return {
+      id: c.id,
+      title: c.title,
+      authors: c.authors ?? "",
+      year,
+      doi: c.doi ?? null,
+      status: c.status,
+      retractionReason: c.retraction?.retractionReason,
+      retractionDate: c.retraction?.retractionDate,
+      retractionCountry: c.retraction?.retractionCountry,
+      retractionJournal: c.retraction?.retractionJournal,
+    };
   });
-  return Math.max(0, score);
 }
 
-// -----------------------------------------------------------------------------
-// Pipeline
-// -----------------------------------------------------------------------------
+function historicalPayloadForJob(h: ReturnType<typeof compareToHistoricalCases>) {
+  return {
+    matchedCase: h.matchedCase?.name ?? "",
+    similarity: String(h.similarity),
+    avgMonthsToCatch: h.avgMonthsToCatch ?? 0,
+    impactDescription: h.impactDescription,
+    severity: h.severity,
+  };
+}
 
 /**
- * Phase 1 — Resolve DOIs
- * Phase 2 — Check retractions
- * Phase 3 — Cascade detection
- * Phase 4 — Replacement suggestions
- * Phase 5 — Score calculation
+ * Phase 1 — Resolve DOIs (CrossRef)
+ * Phase 2 — Retractions (local CSV)
+ * Phase 3 — Cascade (Semantic Scholar + CSV)
+ * Phase 4 — Replacements (Exa)
+ * Phase 5 — Score + job metadata
  */
 export async function runPipeline(
   jobId: string,
@@ -129,7 +140,7 @@ export async function runPipeline(
     try {
       await Promise.resolve(updateCitation(data.id, { phase, ...data }));
     } catch {
-      /* sink — updates must not break pipeline */
+      /* sink */
     }
   };
 
@@ -147,7 +158,12 @@ export async function runPipeline(
     }
   }
 
-  await emitJob({ event: "pipeline_started", total: citations.length });
+  await emitJob({
+    event: "pipeline_started",
+    total: citations.length,
+    status: "running",
+    processedCount: 0,
+  });
 
   // Phase 1 — Resolve DOIs
   await emitJob({ phase: 1, name: "resolve_dois" });
@@ -162,7 +178,7 @@ export async function runPipeline(
 
       let doi = c.doi?.trim() || null;
       if (!doi) {
-        doi = await resolveDoiFromTitleWrapper(c.title);
+        doi = await resolveDoiFromTitleWrapper(c.title, c.authors);
       }
 
       if (!doi) {
@@ -185,7 +201,11 @@ export async function runPipeline(
       });
     } catch {
       c.status = "unverified";
-      await emitCitation("doi_error", { id: c.id, title: c.title, status: c.status });
+      await emitCitation("doi_error", {
+        id: c.id,
+        title: c.title,
+        status: c.status,
+      });
     }
   }
 
@@ -297,18 +317,32 @@ export async function runPipeline(
     }
   }
 
-  // Phase 5 — Score calculation
+  // Phase 5 — Score calculation + analytics for job row
   await emitJob({ phase: 5, name: "score_calculation" });
   let integrityScore = 100;
   try {
-    integrityScore = calculateIntegrityScore(citations);
+    integrityScore = scoreFromScoringTable(pipelineToScoringCitations(citations));
   } catch {
     integrityScore = 0;
   }
 
+  const scoringRows = pipelineToScoringCitations(citations);
+  const hist = compareToHistoricalCases(
+    citations.map((c) => ({
+      retracted: c.status === "retracted",
+      cascade: c.status === "cascade",
+    })),
+    integrityScore,
+  );
+  const downstream = calculateDownstreamRisk(scoringRows);
+
   await emitJob({
     phase: 5,
     integrityScore,
+    processedCount: citations.length,
+    status: "complete",
+    historicalComparison: historicalPayloadForJob(hist),
+    downstreamRisk: downstream,
     perCitation: citations.map((x) => ({
       id: x.id,
       status: x.status,
@@ -316,12 +350,18 @@ export async function runPipeline(
     })),
   });
 
-  await emitJob({ event: "pipeline_complete", integrityScore });
+  await emitJob({
+    event: "pipeline_complete",
+    integrityScore,
+    status: "complete",
+    processedCount: citations.length,
+    historicalComparison: historicalPayloadForJob(hist),
+    downstreamRisk: downstream,
+  });
 
   return { citations, integrityScore };
 }
 
-/** Six fake citations; runs the full pipeline with console-backed updates. */
 export async function testPipeline(): Promise<void> {
   const jobId = "test-job-" + Date.now();
   console.log("\n========== testPipeline() ==========\n");

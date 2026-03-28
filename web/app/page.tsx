@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AnalysisLoadingOverlay } from "@/components/AnalysisLoadingOverlay";
+import { hasConvexUrl } from "@/lib/convexEnv";
 
 export default function HomePage() {
   const router = useRouter();
@@ -14,23 +16,112 @@ export default function HomePage() {
   const [loadMsg, setLoadMsg] = useState("");
   const [step, setStep] = useState(0);
 
-  const runPreview = useCallback(async () => {
-    setError("");
-    setLoading(true);
-    setStep(0);
-    setLoadMsg("Preparing your bibliography preview…");
+  const startIntegrityJob = useCallback(
+    async (citations: unknown[], paperTitle?: string) => {
+      const res = await fetch("/api/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ citations, paperTitle }),
+      });
+      const data = (await res.json()) as { jobId?: string; error?: string };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to start integrity scan");
+      }
+      if (!data.jobId) {
+        throw new Error("No job id returned");
+      }
+      return data.jobId;
+    },
+    [],
+  );
 
-    const delays = [450, 600, 700, 500];
-    for (let i = 0; i < delays.length; i++) {
-      setStep(i);
-      await new Promise((r) => setTimeout(r, delays[i]));
+  const runPdfFlow = useCallback(
+    async (file: File) => {
+      setError("");
+      setLoading(true);
+      setStep(0);
+      setLoadMsg("Extracting references from your PDF…");
+
+      if (!hasConvexUrl()) {
+        setLoading(false);
+        setError(
+          "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan (or open /results/demo).",
+        );
+        return;
+      }
+
+      try {
+        const fd = new FormData();
+        fd.append("pdf", file);
+        const ex = await fetch("/api/extract", { method: "POST", body: fd });
+        const exData = (await ex.json()) as {
+          citations?: unknown[];
+          error?: string;
+        };
+        if (!ex.ok) {
+          throw new Error(exData.error ?? "PDF extraction failed");
+        }
+        const citations = exData.citations;
+        if (!Array.isArray(citations) || citations.length === 0) {
+          throw new Error("No citations found in this PDF.");
+        }
+
+        setStep(2);
+        setLoadMsg("Cross-checking DOIs, retractions, and cascades…");
+        const jobId = await startIntegrityJob(citations, file.name);
+        setLoadMsg("Opening your results…");
+        setStep(3);
+        await new Promise((r) => setTimeout(r, 400));
+        setLoading(false);
+        router.push(`/results/${jobId}`);
+      } catch (e) {
+        setLoading(false);
+        setError(e instanceof Error ? e.message : "Something went wrong.");
+      }
+    },
+    [router, startIntegrityJob],
+  );
+
+  const runPasteFlow = useCallback(async () => {
+    setError("");
+    const lines = paste.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) {
+      setError("Paste at least one reference line, or upload a PDF.");
+      return;
     }
 
-    setLoadMsg("Opening results dashboard…");
-    await new Promise((r) => setTimeout(r, 350));
-    setLoading(false);
-    router.push("/results/demo");
-  }, [router]);
+    if (!hasConvexUrl()) {
+      setError(
+        "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan (or open /results/demo).",
+      );
+      return;
+    }
+
+    setLoading(true);
+    setStep(0);
+    setLoadMsg("Preparing references…");
+
+    try {
+      const citations = lines.map((line) => ({
+        title: line.slice(0, 800),
+        authors: "Unknown",
+        year: null,
+        doi: null,
+      }));
+
+      setStep(1);
+      setLoadMsg("Cross-checking DOIs, retractions, and cascades…");
+      const jobId = await startIntegrityJob(citations);
+      setLoadMsg("Opening your results…");
+      setStep(2);
+      await new Promise((r) => setTimeout(r, 400));
+      setLoading(false);
+      router.push(`/results/${jobId}`);
+    } catch (e) {
+      setLoading(false);
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    }
+  }, [paste, router, startIntegrityJob]);
 
   const onFile = useCallback(
     (file: File | null) => {
@@ -40,21 +131,13 @@ export default function HomePage() {
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
-        setError("PDF must be under 10MB for this preview.");
+        setError("PDF must be under 10MB.");
         return;
       }
-      void runPreview();
+      void runPdfFlow(file);
     },
-    [runPreview],
+    [runPdfFlow],
   );
-
-  const onPasteAnalyze = useCallback(() => {
-    if (!paste.trim()) {
-      setError("Paste at least one reference line, or upload a PDF.");
-      return;
-    }
-    void runPreview();
-  }, [paste, runPreview]);
 
   return (
     <>
@@ -74,20 +157,20 @@ export default function HomePage() {
             </span>
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-center text-sm leading-relaxed text-slate-400">
-            Frontend-only preview: polished dashboard with mock integrity data.
-            Your backend teammate can plug real extraction and Convex later —
-            the UI is ready.
+            Upload a PDF or paste references. We extract the bibliography, resolve
+            DOIs via CrossRef, check Retraction Watch data, scan citation cascades
+            via Semantic Scholar, and stream progress live from Convex.
           </p>
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-3 text-xs text-slate-500">
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              45,000+ retractions tracked
+              Retraction Watch CSV
             </span>
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
               Cascade visualization
             </span>
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              Built for researchers
+              Live Convex updates
             </span>
           </div>
 
@@ -133,7 +216,7 @@ export default function HomePage() {
                 Drop your PDF here
               </span>
               <span className="mt-1 block text-slate-500">
-                or click to browse · mock run, no upload leaves your machine
+                or click to browse · text-based PDFs work best
               </span>
             </label>
           </div>
@@ -163,15 +246,22 @@ export default function HomePage() {
 
           <button
             type="button"
-            onClick={onPasteAnalyze}
+            onClick={() => void runPasteFlow()}
             className="mt-6 w-full rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition hover:from-blue-500 hover:to-blue-400"
           >
-            Analyze bibliography (preview)
+            Analyze bibliography
           </button>
+
+          <p className="mt-4 text-center text-xs text-slate-600">
+            Try the static dashboard:{" "}
+            <Link href="/results/demo" className="text-blue-400 hover:underline">
+              /results/demo
+            </Link>
+          </p>
         </main>
 
         <footer className="absolute bottom-0 left-0 right-0 border-t border-white/5 py-4 text-center text-xs text-slate-600">
-          Free. No account required. Built for researchers · Talos / RetractWatch
+          RetractWatch V2 · Talos
         </footer>
       </div>
     </>
