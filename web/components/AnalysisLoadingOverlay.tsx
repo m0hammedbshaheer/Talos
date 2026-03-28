@@ -7,10 +7,10 @@ type Props = {
 };
 
 const steps = [
-  "Parsing bibliography…",
-  "Resolving identifiers…",
-  "Scanning retraction corpus…",
-  "Building cascade graph…",
+  "Extracting bibliography from PDF…",
+  "Checking 57,393 retraction records…",
+  "Detecting cascade contamination…",
+  "Calculating integrity score…",
 ];
 
 export function AnalysisLoadingOverlay({ open, message, step }: Props) {
@@ -27,7 +27,7 @@ export function AnalysisLoadingOverlay({ open, message, step }: Props) {
         <p className="text-center text-sm font-medium text-white">{message}</p>
         <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-slate-800">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-500 ease-out"
+            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-700 ease-out"
             style={{ width: `${Math.min(100, ((step + 1) / steps.length) * 100)}%` }}
           />
         </div>
@@ -35,16 +35,16 @@ export function AnalysisLoadingOverlay({ open, message, step }: Props) {
           {steps.map((s, i) => (
             <li
               key={s}
-              className={`flex items-center gap-2 ${
+              className={`flex items-center gap-2 transition-colors duration-300 ${
                 i <= step ? "text-slate-200" : ""
               }`}
             >
               <span
-                className={`h-1.5 w-1.5 rounded-full ${
+                className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300 ${
                   i < step
                     ? "bg-emerald-400"
                     : i === step
-                      ? "bg-blue-400 animate-pulse"
+                      ? "animate-pulse bg-blue-400"
                       : "bg-slate-600"
                 }`}
               />
@@ -52,6 +52,9 @@ export function AnalysisLoadingOverlay({ open, message, step }: Props) {
             </li>
           ))}
         </ul>
+        <p className="mt-5 text-center text-[10px] text-slate-600">
+          This may take 30–60 seconds for large bibliographies
+        </p>
       </div>
     </div>
   );

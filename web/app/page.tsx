@@ -1,9 +1,18 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AnalysisLoadingOverlay } from "@/components/AnalysisLoadingOverlay";
+
+type CheckResult = {
+  jobId: string;
+  status: string;
+  integrityScore: number;
+  historicalComparison: unknown;
+  downstreamRisk: unknown;
+  citations: unknown[];
+};
 
 export default function HomePage() {
   const router = useRouter();
@@ -13,24 +22,101 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
   const [step, setStep] = useState(0);
+  const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const runAnalysis = useCallback(async () => {
-    setError("");
-    setLoading(true);
-    setStep(0);
-    setLoadMsg("Preparing your bibliography analysis…");
-
-    const delays = [450, 600, 700, 500];
-    for (let i = 0; i < delays.length; i++) {
-      setStep(i);
-      await new Promise((r) => setTimeout(r, delays[i]));
+  const clearStepTimer = () => {
+    if (stepTimerRef.current !== null) {
+      clearInterval(stepTimerRef.current);
+      stepTimerRef.current = null;
     }
+  };
 
-    setLoadMsg("Opening results dashboard…");
-    await new Promise((r) => setTimeout(r, 350));
-    setLoading(false);
-    router.push("/results/demo");
-  }, [router]);
+  const runAnalysis = useCallback(
+    async (file?: File | null, pasteText?: string) => {
+      setError("");
+      setLoading(true);
+      setStep(0);
+      setLoadMsg("Extracting bibliography…");
+
+      try {
+        let citations: unknown[];
+
+        if (file) {
+          const formData = new FormData();
+          formData.append("pdf", file);
+          const extractRes = await fetch("/api/extract", {
+            method: "POST",
+            body: formData,
+          });
+          if (!extractRes.ok) {
+            const e = (await extractRes.json()) as { error?: string };
+            throw new Error(e.error ?? "Failed to extract PDF");
+          }
+          const extracted = (await extractRes.json()) as {
+            citations?: unknown[];
+          };
+          citations = extracted.citations ?? [];
+          if (!citations.length)
+            throw new Error("No references found in this PDF.");
+        } else {
+          // Parse pasted references — each non-empty line becomes a citation
+          citations = (pasteText ?? "")
+            .split("\n")
+            .map((line, i) => ({ id: `c${i + 1}`, title: line.trim() }))
+            .filter((c) => (c as { title: string }).title.length > 8);
+          if (!citations.length)
+            throw new Error("Paste at least one reference line.");
+        }
+
+        setStep(1);
+        setLoadMsg("Checking 57,393 retraction records…");
+
+        // Advance steps while pipeline runs (30–60 s for real papers)
+        stepTimerRef.current = setInterval(() => {
+          setStep((s) => {
+            const next = Math.min(s + 1, 2);
+            if (next === 2) setLoadMsg("Detecting cascade contamination…");
+            return next;
+          });
+        }, 18000);
+
+        const checkRes = await fetch("/api/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ citations }),
+        });
+
+        clearStepTimer();
+
+        if (!checkRes.ok) {
+          const e = (await checkRes.json()) as { error?: string };
+          throw new Error(e.error ?? "Analysis failed. Try again.");
+        }
+
+        const result = (await checkRes.json()) as CheckResult;
+
+        // Persist results so the results page can render without Convex
+        sessionStorage.setItem(
+          `rw:job:${result.jobId}`,
+          JSON.stringify(result),
+        );
+
+        setStep(3);
+        setLoadMsg("Opening results dashboard…");
+        await new Promise((r) => setTimeout(r, 400));
+
+        router.push(`/results/${result.jobId}`);
+      } catch (err) {
+        clearStepTimer();
+        setError(
+          err instanceof Error ? err.message : "Something went wrong. Try again.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [router],
+  );
 
   const onFile = useCallback(
     (file: File | null) => {
@@ -43,7 +129,7 @@ export default function HomePage() {
         setError("PDF must be under 10MB.");
         return;
       }
-      void runAnalysis();
+      void runAnalysis(file);
     },
     [runAnalysis],
   );
@@ -53,7 +139,7 @@ export default function HomePage() {
       setError("Paste at least one reference line, or upload a PDF.");
       return;
     }
-    void runAnalysis();
+    void runAnalysis(undefined, paste);
   }, [paste, runAnalysis]);
 
   const sampleCitations = [

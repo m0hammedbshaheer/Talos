@@ -18,7 +18,7 @@ type Props = {
   citations: CitationRow[];
   loading?: boolean;
   notFound?: boolean;
-  dataSource?: "convex" | "demo";
+  dataSource?: "convex" | "demo" | "inline";
 };
 
 export function ResultsLayout({
@@ -48,7 +48,11 @@ export function ResultsLayout({
             <p className="font-mono text-sm text-slate-300">{jobId}</p>
             {dataSource ? (
               <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-600">
-                {dataSource === "convex" ? "Live · Convex" : "Demo · mock data"}
+                {dataSource === "convex"
+                  ? "Live · Convex"
+                  : dataSource === "inline"
+                    ? "Live · analyzed"
+                    : "Demo · sample data"}
               </p>
             ) : null}
           </div>
@@ -113,11 +117,11 @@ export function ResultsLayout({
           </>
         ) : null}
 
-        <p className="mt-6 text-center text-xs text-slate-600">
-          {notFound || loading
-            ? null
-            : "Renders backend fields as-is; optional data uses safe fallbacks."}
-        </p>
+        {dataSource === "demo" ? (
+          <p className="mt-6 text-center text-xs text-slate-700">
+            Sample data — upload a real paper to see your actual results
+          </p>
+        ) : null}
       </div>
     </div>
   );
