@@ -18,6 +18,7 @@ function normalizeCitations(raw: unknown): PipelineCitation[] {
       year: o.year as number | string | undefined,
       doi: typeof o.doi === "string" ? o.doi : undefined,
       authors: typeof o.authors === "string" ? o.authors : undefined,
+      status: "pending" as const,
     };
   });
 }
@@ -48,16 +49,14 @@ export async function POST(request: Request) {
   const jobId = "job_" + Date.now();
   const citations = normalizeCitations(citationsRaw);
 
-  void runPipeline(
-    jobId,
-    citations,
-    async (id, updates) => {
+  void runPipeline(jobId, citations, {
+    updateCitation: async (id, updates) => {
       console.log("Citation update:", id, updates);
     },
-    async (updates) => {
+    updateJob: async (updates) => {
       console.log("Job update:", updates);
     },
-  ).catch((err) => {
+  }).catch((err) => {
     console.error("[check pipeline]", jobId, err);
   });
 
