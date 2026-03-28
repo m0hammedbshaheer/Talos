@@ -13,6 +13,7 @@ export type ReplacementPaper = {
 export async function findReplacementPapers(
   query: string,
 ): Promise<ReplacementPaper[]> {
+  console.log("EXA CALLED");
   const apiKey = process.env.EXA_API_KEY;
   if (!apiKey?.trim()) {
     return [];

@@ -18,7 +18,7 @@ type Props = {
   citations: CitationRow[];
   loading?: boolean;
   notFound?: boolean;
-  dataSource?: "convex" | "demo";
+  dataSource?: "convex";
 };
 
 export function ResultsLayout({
@@ -48,7 +48,7 @@ export function ResultsLayout({
             <p className="font-mono text-sm text-slate-300">{jobId}</p>
             {dataSource ? (
               <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-600">
-                {dataSource === "convex" ? "Live · Convex" : "Demo · mock data"}
+                Live · Convex
               </p>
             ) : null}
           </div>
@@ -98,8 +98,7 @@ export function ResultsLayout({
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <CitationFeed
                 citations={citations}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
+                onSelectedCitationChange={setSelectedId}
               />
               <CascadeGraph
                 citations={citations}

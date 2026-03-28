@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -45,7 +44,7 @@ export default function HomePage() {
       if (!hasConvexUrl()) {
         setLoading(false);
         setError(
-          "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan (or open /results/demo).",
+          "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan.",
         );
         return;
       }
@@ -57,9 +56,15 @@ export default function HomePage() {
         const exData = (await ex.json()) as {
           citations?: unknown[];
           error?: string;
+          detail?: string;
         };
         if (!ex.ok) {
-          throw new Error(exData.error ?? "PDF extraction failed");
+          const msg = exData.error ?? "PDF extraction failed";
+          const hint =
+            exData.detail && process.env.NODE_ENV === "development"
+              ? ` (${exData.detail})`
+              : "";
+          throw new Error(`${msg}${hint}`);
         }
         const citations = exData.citations;
         if (!Array.isArray(citations) || citations.length === 0) {
@@ -92,7 +97,7 @@ export default function HomePage() {
 
     if (!hasConvexUrl()) {
       setError(
-        "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan (or open /results/demo).",
+        "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan.",
       );
       return;
     }
@@ -177,6 +182,13 @@ export default function HomePage() {
           <div
             role="button"
             tabIndex={0}
+            onClick={() => document.getElementById("pdf-input")?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                document.getElementById("pdf-input")?.click();
+              }
+            }}
             onDragEnter={(e) => {
               e.preventDefault();
               setDrag(true);
@@ -192,12 +204,18 @@ export default function HomePage() {
               const f = e.dataTransfer.files[0];
               onFile(f ?? null);
             }}
-            className={`mt-12 rounded-2xl border-2 border-dashed p-10 text-center transition ${
+            className={`group relative mt-12 cursor-pointer select-none overflow-hidden rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
               drag
-                ? "border-blue-400 bg-blue-500/10 shadow-[0_0_48px_rgba(59,130,246,0.2)]"
-                : "border-slate-600/60 bg-slate-900/40 hover:border-blue-500/50 hover:bg-slate-900/60"
+                ? "scale-[1.02] border-blue-400 bg-blue-500/10 shadow-[0_0_60px_rgba(59,130,246,0.25)]"
+                : "border-slate-600/60 bg-slate-900/40 hover:scale-[1.01] hover:border-blue-400/70 hover:bg-slate-900/60 hover:shadow-[0_0_40px_rgba(59,130,246,0.12)]"
             }`}
           >
+            <div className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-400/50 to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-blue-400/50 to-transparent" />
+              <div className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-blue-400/50 to-transparent" />
+              <div className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-blue-400/50 to-transparent" />
+            </div>
             <input
               type="file"
               accept="application/pdf,.pdf"
@@ -205,20 +223,18 @@ export default function HomePage() {
               id="pdf-input"
               onChange={(e) => onFile(e.target.files?.[0] ?? null)}
             />
-            <label
-              htmlFor="pdf-input"
-              className="cursor-pointer text-sm text-slate-300"
+            <span
+              className={`mb-3 block text-4xl transition-transform duration-300 ${drag ? "scale-110" : "group-hover:scale-110"}`}
+              aria-hidden
             >
-              <span className="mb-2 block text-3xl" aria-hidden>
-                📄
-              </span>
-              <span className="font-semibold text-white">
-                Drop your PDF here
-              </span>
-              <span className="mt-1 block text-slate-500">
-                or click to browse · text-based PDFs work best
-              </span>
-            </label>
+              📄
+            </span>
+            <span className="block font-semibold text-white">
+              Drop your PDF here
+            </span>
+            <span className="mt-1 block text-sm text-slate-500 transition-colors duration-200 group-hover:text-slate-400">
+              or click anywhere to browse · text-based PDFs work best
+            </span>
           </div>
 
           {error && (
@@ -252,12 +268,6 @@ export default function HomePage() {
             Analyze bibliography
           </button>
 
-          <p className="mt-4 text-center text-xs text-slate-600">
-            Try the static dashboard:{" "}
-            <Link href="/results/demo" className="text-blue-400 hover:underline">
-              /results/demo
-            </Link>
-          </p>
         </main>
 
         <footer className="absolute bottom-0 left-0 right-0 border-t border-white/5 py-4 text-center text-xs text-slate-600">

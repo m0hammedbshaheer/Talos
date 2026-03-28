@@ -8,6 +8,7 @@ export const CITATION_STATUSES = [
   "clean",
   "retracted",
   "cascade",
+  "cascade-unknown",
   "unverified",
 ] as const;
 

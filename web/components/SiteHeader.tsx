@@ -19,11 +19,6 @@ export function SiteHeader() {
           </p>
         </div>
       </Link>
-      <nav className="hidden items-center gap-6 text-sm text-slate-400 sm:flex">
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">
-          Frontend preview · mock data
-        </span>
-      </nav>
     </header>
   );
 }

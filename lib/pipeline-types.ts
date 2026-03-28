@@ -13,6 +13,7 @@ export type PipelineCitationStatus =
   | "clean"
   | "retracted"
   | "cascade"
+  | "cascade-unknown"
   | "unverified";
 
 export type ReferenceRow = {
@@ -39,6 +40,8 @@ export type PipelineCitation = {
   retraction?: RetractionRecord | null;
   references?: ReferenceRow[];
   replacements?: ReplacementRow[];
+  /** Set when status is cascade or cascade-unknown (upstream / API explanation). */
+  cascadeVia?: string;
 };
 
 export type PipelineUpdateFns = {

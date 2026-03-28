@@ -1,7 +1,10 @@
 // DOCUMENTATION NOTE:
 // Integrity pipeline: CrossRef → Retraction Watch CSV → Semantic Scholar → Exa.
-// Updates are injected (e.g. Convex); no database imports in this module.
+// Updates are injected (e.g. Convex). Phase 4 also persists replacements via Convex HTTP when URL is set.
 
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { resolveDoiFromTitle } from "./crossref";
 import { calculateDownstreamRisk } from "./downstreamRisk";
 import { findReplacementPapers } from "./exa";
@@ -11,7 +14,10 @@ import {
   calculateIntegrityScore as scoreFromScoringTable,
   type Citation as ScoringCitation,
 } from "./scoring";
-import { getReferences } from "./semanticScholar";
+import {
+  getReferences,
+  type GetReferencesResult as ScholarRefsResult,
+} from "./semanticScholar";
 import type {
   PipelineCitation,
   PipelineUpdateFns,
@@ -57,12 +63,18 @@ export async function isRetractedWrapper(
   }
 }
 
-export async function getReferencesWrapper(doi: string): Promise<ReferenceRow[]> {
+export async function getReferencesWrapper(
+  doi: string,
+): Promise<ScholarRefsResult> {
   try {
-    const rows = await getReferences(doi);
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+    return await getReferences(doi);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[pipeline] getReferencesWrapper unexpected error", {
+      doi,
+      message,
+    });
+    return { ok: false, message: `Unexpected: ${message}` };
   }
 }
 
@@ -111,7 +123,7 @@ function pipelineToScoringCitations(p: PipelineCitation[]): ScoringCitation[] {
 
 function historicalPayloadForJob(h: ReturnType<typeof compareToHistoricalCases>) {
   return {
-    matchedCase: h.matchedCase?.name ?? "",
+    matchedCase: h.matchedCase?.similarToLabel ?? "",
     similarity: String(h.similarity),
     avgMonthsToCatch: h.avgMonthsToCatch ?? 0,
     impactDescription: h.impactDescription,
@@ -132,6 +144,9 @@ export async function runPipeline(
   fns: PipelineUpdateFns,
 ): Promise<{ citations: PipelineCitation[]; integrityScore: number }> {
   const { updateCitation, updateJob } = fns;
+
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL?.trim();
+  const convexClient = convexUrl ? new ConvexHttpClient(convexUrl) : null;
 
   const emitCitation = async (
     phase: string,
@@ -265,27 +280,67 @@ export async function runPipeline(
         status: c.status,
       });
 
-      const refs = await getReferencesWrapper(c.doi);
+      const scholar = await getReferencesWrapper(c.doi);
+
+      if (!scholar.ok) {
+        c.references = [];
+        c.status = "cascade-unknown";
+        c.cascadeVia =
+          "Semantic Scholar reference list could not be loaded; cascade status unknown.";
+        console.log("[pipeline] cascade-unknown (API did not return usable data)", {
+          citationId: c.id,
+          paperTitle: c.title,
+          doi: c.doi,
+          message: scholar.message,
+          rateLimited: scholar.rateLimited,
+          statusCode: scholar.statusCode,
+        });
+        await emitCitation("cascade_unknown", {
+          id: c.id,
+          status: c.status,
+          cascadeVia: c.cascadeVia,
+        });
+        continue;
+      }
+
+      const refs = scholar.references;
       c.references = refs;
 
       let cascaded = false;
+      let cascadeViaRef: ReferenceRow | null = null;
       for (const ref of refs) {
         const refRet = await isRetractedWrapper(ref.doi);
         if (refRet) {
           cascaded = true;
+          cascadeViaRef = ref;
           break;
         }
       }
 
       if (cascaded) {
         c.status = "cascade";
+        const viaLabel =
+          cascadeViaRef?.title?.trim() ||
+          cascadeViaRef?.doi ||
+          "retracted upstream reference";
+        c.cascadeVia = viaLabel;
+        console.log("[pipeline] cascade detected", {
+          citationId: c.id,
+          paperTitle: c.title,
+          citingDoi: c.doi,
+          upstreamRetractedDoi: cascadeViaRef?.doi,
+          upstreamTitle: cascadeViaRef?.title,
+          refsChecked: refs.length,
+        });
         await emitCitation("cascade", {
           id: c.id,
           references: refs,
           status: c.status,
+          cascadeVia: c.cascadeVia,
         });
       } else {
         c.status = "clean";
+        c.cascadeVia = undefined;
         await emitCitation("no_cascade", { id: c.id, status: c.status });
       }
     } catch {
@@ -306,6 +361,22 @@ export async function runPipeline(
       }
       const replacements = await findReplacementPapersWrapper(c.title, c.year);
       c.replacements = replacements;
+      if (convexClient) {
+        for (const r of replacements) {
+          try {
+            await convexClient.mutation(api.replacements.createReplacement, {
+              citationId: c.id as Id<"citations">,
+              title: r.title,
+              url: r.url,
+              summary: r.summary ?? "",
+              publishedDate: r.publishedDate?.trim() || "Unknown",
+              relevanceScore: r.relevanceScore ?? 0.5,
+            });
+          } catch (err) {
+            console.error("[pipeline] createReplacement failed", c.id, err);
+          }
+        }
+      }
       await emitCitation("replacements", {
         id: c.id,
         replacements,
@@ -330,7 +401,11 @@ export async function runPipeline(
   const hist = compareToHistoricalCases(
     citations.map((c) => ({
       retracted: c.status === "retracted",
-      cascade: c.status === "cascade",
+      cascade: c.status === "cascade" || c.status === "cascade-unknown",
+      retractionReason: c.retraction?.retractionReason,
+      journal: c.retraction?.retractionJournal,
+      title: c.title,
+      cascadeVia: c.cascadeVia,
     })),
     integrityScore,
   );

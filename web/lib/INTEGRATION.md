@@ -37,4 +37,4 @@ After creating a job, send users to `/results/<jobs._id>` where `<jobs._id>` is 
 3. Add `NEXT_PUBLIC_CONVEX_URL` to `.env.local`
 4. `npm run dev`
 
-If `NEXT_PUBLIC_CONVEX_URL` is missing, `/results/demo` and the home preview still work with mock data.
+If `NEXT_PUBLIC_CONVEX_URL` is missing, live scans and results pages require configuration before they work.

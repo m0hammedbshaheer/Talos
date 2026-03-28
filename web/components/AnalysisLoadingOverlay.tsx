@@ -27,30 +27,42 @@ export function AnalysisLoadingOverlay({ open, message, step }: Props) {
         <p className="text-center text-sm font-medium text-white">{message}</p>
         <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-slate-800">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-500 ease-out"
+            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-700 ease-out"
             style={{ width: `${Math.min(100, ((step + 1) / steps.length) * 100)}%` }}
           />
         </div>
-        <ul className="mt-6 space-y-2 text-xs text-slate-400">
-          {steps.map((s, i) => (
-            <li
-              key={s}
-              className={`flex items-center gap-2 ${
-                i <= step ? "text-slate-200" : ""
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  i < step
-                    ? "bg-emerald-400"
-                    : i === step
-                      ? "bg-blue-400 animate-pulse"
-                      : "bg-slate-600"
+        <ul className="mt-6 space-y-3 text-xs text-slate-400">
+          {steps.map((s, i) => {
+            const isDone = i < step;
+            const isActive = i === step;
+            const isPending = i > step;
+
+            return (
+              <li
+                key={s}
+                className={`flex items-center gap-3 transition-all duration-500 ${
+                  isDone || isActive ? "text-slate-200" : "text-slate-500"
                 }`}
-              />
-              {s}
-            </li>
-          ))}
+                style={{ transitionDelay: `${i * 80}ms` }}
+              >
+                <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
+                  {isDone && (
+                    <span className="block h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)] rw-step-done" />
+                  )}
+                  {isActive && (
+                    <>
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-50" />
+                      <span className="relative block h-2 w-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.9)] rw-step-pulse" />
+                    </>
+                  )}
+                  {isPending && (
+                    <span className="block h-1.5 w-1.5 rounded-full bg-slate-600" />
+                  )}
+                </span>
+                <span>{s}</span>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>
