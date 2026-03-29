@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { IntegrityScore } from "@/components/IntegrityScore";
-import { HistoricalComparison } from "@/components/HistoricalComparison";
 import { DownstreamRisk } from "@/components/DownstreamRisk";
 import { CitationFeed } from "@/components/CitationFeed";
 import { CascadeGraph } from "@/components/CascadeGraph";
@@ -17,6 +16,8 @@ type Props = {
   job: JobViewModel | null;
   citations: CitationRow[];
   loading?: boolean;
+  /** Job row is ready but Convex citations query has not returned yet. */
+  citationsLoading?: boolean;
   notFound?: boolean;
   dataSource?: "convex" | "demo";
 };
@@ -26,6 +27,7 @@ export function ResultsLayout({
   job,
   citations,
   loading,
+  citationsLoading,
   notFound,
   dataSource,
 }: Props) {
@@ -49,7 +51,7 @@ export function ResultsLayout({
             {dataSource ? (
               <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-600">
                 {dataSource === "convex"
-                  ? "Live · Convex"
+                  ? "Full results · saved online"
                   : "Demo · sample data"}
               </p>
             ) : null}
@@ -65,14 +67,11 @@ export function ResultsLayout({
         {loading ? (
           <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-10 text-center text-slate-400">
             <p className="text-sm font-medium text-slate-200">
-              Loading job and citations…
+              Loading job…
             </p>
             <p className="mt-2 text-xs text-slate-500">
               Waiting for{" "}
-              <code className="text-slate-400">api.jobs.getJob</code> and{" "}
-              <code className="text-slate-400">
-                api.citations.getCitationsForJob
-              </code>
+              <code className="text-slate-400">api.jobs.getJob</code>
             </p>
           </div>
         ) : null}
@@ -81,35 +80,56 @@ export function ResultsLayout({
           <div className="rounded-2xl border border-amber-500/20 bg-amber-950/20 p-10 text-center">
             <p className="text-sm font-medium text-amber-200">Job not found</p>
             <p className="mt-2 text-xs text-amber-200/70">
-              No document for this id in Convex{" "}
-              <code className="text-amber-100/90">jobs</code>.
+              No saved analysis was found for this job id.
             </p>
           </div>
         ) : null}
 
         {!loading && !notFound ? (
           <>
-            <div className="grid gap-4 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-2">
               <IntegrityScore score={score} status={status} />
-              <HistoricalComparison
-                comparison={job?.historicalComparison ?? undefined}
-              />
               <DownstreamRisk risk={job?.downstreamRisk ?? undefined} />
             </div>
 
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <CitationFeed
-                citations={citations}
-                onSelectedCitationChange={setSelectedId}
-              />
-              <CascadeGraph
-                citations={citations}
-                highlightId={selectedId}
-              />
-            </div>
+            {citationsLoading ? (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-8 text-center">
+                <p className="text-sm font-medium text-slate-200">
+                  Loading citations…
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Feed and cascade graph appear when{" "}
+                  <code className="text-slate-400">
+                    api.citations.getCitationsForJob
+                  </code>{" "}
+                  finishes.
+                </p>
+                <div className="mx-auto mt-6 grid max-w-3xl gap-3 lg:grid-cols-2">
+                  <div className="h-40 rounded-xl border border-white/5 bg-slate-800/40 rw-shimmer" />
+                  <div className="h-40 rounded-xl border border-white/5 bg-slate-800/40 rw-shimmer" />
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <CitationFeed
+                  citations={citations}
+                  onSelectedCitationChange={setSelectedId}
+                />
+                <CascadeGraph
+                  citations={citations}
+                  highlightId={selectedId}
+                />
+              </div>
+            )}
 
             <div className="mt-6">
-              <ReportDownload job={job} citations={citations} />
+              {citationsLoading ? (
+                <div className="rounded-2xl border border-white/10 bg-slate-900/30 px-5 py-4 text-sm text-slate-500">
+                  Export report unlocks after citations load.
+                </div>
+              ) : (
+                <ReportDownload job={job} citations={citations} />
+              )}
             </div>
           </>
         ) : null}

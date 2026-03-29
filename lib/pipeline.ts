@@ -5,7 +5,6 @@
 import { resolveDoiFromTitle } from "./crossref";
 import { calculateDownstreamRisk } from "./downstreamRisk";
 import { findReplacementPapers } from "./exa";
-import { compareToHistoricalCases } from "./historicalCases";
 import { isRetracted } from "./retractionWatch";
 import {
   calculateIntegrityScore as scoreFromScoringTable,
@@ -116,16 +115,6 @@ function pipelineToScoringCitations(p: PipelineCitation[]): ScoringCitation[] {
       retractionJournal: c.retraction?.retractionJournal,
     };
   });
-}
-
-function historicalPayloadForJob(h: ReturnType<typeof compareToHistoricalCases>) {
-  return {
-    matchedCase: h.matchedCase?.name ?? "",
-    similarity: String(h.similarity),
-    avgMonthsToCatch: h.avgMonthsToCatch ?? 0,
-    impactDescription: h.impactDescription,
-    severity: h.severity,
-  };
 }
 
 /**
@@ -376,14 +365,6 @@ export async function runPipeline(
   }
 
   const scoringRows = pipelineToScoringCitations(citations);
-  const hist = compareToHistoricalCases(
-    citations.map((c) => ({
-      retracted: c.status === "retracted",
-      cascade:
-        c.status === "cascade" || c.status === "cascade-unknown",
-    })),
-    integrityScore,
-  );
   const downstream = calculateDownstreamRisk(scoringRows);
 
   await emitJob({
@@ -391,7 +372,6 @@ export async function runPipeline(
     integrityScore,
     processedCount: citations.length,
     status: "complete",
-    historicalComparison: historicalPayloadForJob(hist),
     downstreamRisk: downstream,
     perCitation: citations.map((x) => ({
       id: x.id,
@@ -405,7 +385,6 @@ export async function runPipeline(
     integrityScore,
     status: "complete",
     processedCount: citations.length,
-    historicalComparison: historicalPayloadForJob(hist),
     downstreamRisk: downstream,
   });
 

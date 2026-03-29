@@ -35,9 +35,13 @@ function normalizeDoi(doi: string): string {
 
 function csvPath(): string {
   try {
-    return path.join(process.cwd(), "data", "retraction_watch.csv");
+    const filePath = path.resolve(process.cwd(), "data", "retraction_watch.csv");
+    console.log("[retractionWatch] retraction_watch.csv path:", filePath);
+    return filePath;
   } catch {
-    return path.join(".", "data", "retraction_watch.csv");
+    const fallback = path.resolve(process.cwd(), "data", "retraction_watch.csv");
+    console.log("[retractionWatch] retraction_watch.csv path (fallback):", fallback);
+    return fallback;
   }
 }
 

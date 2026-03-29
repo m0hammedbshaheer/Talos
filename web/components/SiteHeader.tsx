@@ -22,15 +22,21 @@ export function SiteHeader() {
         </Link>
 
         <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
-          <p className="hidden text-right text-[10px] leading-tight text-slate-500 sm:block sm:max-w-[200px]">
-            Retraction Watch · CrossRef · Semantic Scholar
+          <p className="hidden text-right text-[10px] leading-tight text-slate-500 sm:block sm:max-w-[220px]">
+            We cross-check your bibliography against Retraction Watch, CrossRef, and
+            Semantic Scholar — not a list you upload.
           </p>
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 sm:px-3">
+          <div
+            className="flex max-w-[140px] flex-col items-end gap-0.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 sm:max-w-none sm:flex-row sm:items-center sm:gap-2 sm:px-3"
+            title="Public Retraction Watch index (~57K records). Your references are matched against this database."
+          >
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               V2
             </span>
-            <span className="h-3 w-px bg-white/15" aria-hidden />
-            <span className="text-[10px] text-slate-500">57K+ DB</span>
+            <span className="hidden h-3 w-px bg-white/15 sm:block" aria-hidden />
+            <span className="text-right text-[10px] leading-tight text-slate-500">
+              RW index · 57K+ records
+            </span>
           </div>
         </div>
       </div>

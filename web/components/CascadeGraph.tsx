@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, memo } from "react";
 import type { ReactNode } from "react";
 import type { CitationRow } from "@/lib/citationRow";
 
@@ -10,6 +10,8 @@ type Props = {
 };
 
 const SUMMARY_THRESHOLD = 10;
+/** Cap SVG dot nodes so large bibliographies stay interactive (graph view only). */
+const MAX_GRAPH_DOT_NODES = 96;
 
 /** Graph layout: ~2× prior spacing (no d3 in project — approximates larger collide radius). */
 const COLS_FLAG = 2;
@@ -448,7 +450,7 @@ function SmallCitationList(props: {
   );
 }
 
-function CompactGraphView(props: {
+const CompactGraphView = memo(function CompactGraphView(props: {
   retracted: CitationRow[];
   cascade: CitationRow[];
   clean: CitationRow[];
@@ -459,7 +461,7 @@ function CompactGraphView(props: {
 }) {
   const { retracted, cascade, clean, unverified, other, filters, highlightId } = props;
 
-  const { viewW, viewH, hubCx, flagged, dots, dotsLabelY } = useMemo(() => {
+  const graph = useMemo(() => {
     const viewW = 560;
     const hubCx = viewW / 2;
 
@@ -479,6 +481,14 @@ function CompactGraphView(props: {
     if (filters.unverified) {
       pushDots(unverified, "unverified");
       pushDots(other, "other");
+    }
+
+    const totalDotSources = dotItems.length;
+    let dotsOverflow = 0;
+    if (dotItems.length > MAX_GRAPH_DOT_NODES) {
+      dotsOverflow = dotItems.length - MAX_GRAPH_DOT_NODES;
+      dotItems.length = MAX_GRAPH_DOT_NODES;
+      dotKinds.length = MAX_GRAPH_DOT_NODES;
     }
 
     const startFlaggedY = 96;
@@ -506,79 +516,187 @@ function CompactGraphView(props: {
     const footerPad = 20;
     const viewH = Math.max(200, bottom + footerPad);
 
+    const segs: ReactNode[] = [];
+    if (busGeom && busGeom.nodes.length > 0) {
+      segs.push(
+        <line
+          key="spine"
+          x1={hubCx}
+          y1={HUB_BOTTOM}
+          x2={hubCx}
+          y2={busGeom.busY}
+          stroke="rgba(148,163,184,0.4)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />,
+      );
+      segs.push(
+        <line
+          key="bus"
+          x1={busGeom.busLeft}
+          y1={busGeom.busY}
+          x2={busGeom.busRight}
+          y2={busGeom.busY}
+          stroke="rgba(251,191,36,0.35)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />,
+      );
+      busGeom.nodes.forEach((n) => {
+        const st = STYLES[n.kind];
+        const midY = n.y + NODE_H_FLAG / 2;
+        const hi = highlightId === n.citation.id;
+        segs.push(
+          <line
+            key={`drop-${n.citation.id}`}
+            x1={n.x}
+            y1={busGeom.busY}
+            x2={n.x}
+            y2={midY}
+            stroke={st.drop}
+            strokeWidth={hi ? 2.4 : 1.5}
+            strokeLinecap="round"
+            opacity={hi ? 1 : 0.92}
+          />,
+        );
+      });
+    }
+
+    const dotCircles = placedDots.map((d) => {
+      const hi = highlightId === d.citation.id;
+      return (
+        <circle
+          key={`dot-${d.citation.id}`}
+          cx={d.x}
+          cy={d.y}
+          r={hi ? DOT_R + 1.5 : DOT_R}
+          className={
+            hi
+              ? "fill-sky-400/80 stroke-sky-200/60"
+              : "fill-slate-500/55 stroke-slate-400/35"
+          }
+          strokeWidth={hi ? 1.25 : 0.75}
+        />
+      );
+    });
+
+    const flaggedGroups =
+      busGeom && busGeom.nodes.length > 0
+        ? busGeom.nodes.map((n) => {
+            const st = STYLES[n.kind];
+            const cid = n.citation.id;
+            const hi = highlightId === cid;
+            const nx = n.x - NODE_W_FLAG / 2;
+            const [line1, line2] = titleTwoLines(n.citation.title);
+            const viaFull = (n.citation.cascadeVia ?? "").trim();
+            const viaTip = viaFull ? `Via: ${viaFull}` : "Via: unknown upstream";
+            return (
+              <g key={cid} filter="url(#cg-node-shadow)">
+                {n.kind === "cascade" ? <title>{viaTip}</title> : null}
+                <rect
+                  x={nx}
+                  y={n.y}
+                  width={NODE_W_FLAG}
+                  height={NODE_H_FLAG}
+                  rx="10"
+                  className={`${st.fill} ${st.stroke} ${hi ? "stroke-white/55" : ""}`}
+                  strokeWidth={hi ? 2.4 : 1.2}
+                />
+                <text
+                  x={n.x}
+                  y={n.y + 14}
+                  textAnchor="middle"
+                  className={`${st.text} text-[8.5px] leading-tight`}
+                >
+                  {line1}
+                </text>
+                {line2 ? (
+                  <text
+                    x={n.x}
+                    y={n.y + 25}
+                    textAnchor="middle"
+                    className={`${st.text} text-[8.5px] leading-tight`}
+                  >
+                    {line2}
+                  </text>
+                ) : null}
+                {n.kind === "cascade" ? (
+                  <text
+                    x={n.x}
+                    y={n.y + (line2 ? 36 : 28)}
+                    textAnchor="middle"
+                    className="fill-orange-200/75 text-[6.5px] leading-tight"
+                  >
+                    {`Via: ${truncateVia(n.citation.cascadeVia, 40)}`}
+                  </text>
+                ) : null}
+                <text
+                  x={n.x}
+                  y={n.y + (n.kind === "cascade" ? 50 : 46)}
+                  textAnchor="middle"
+                  className={`${st.subtext} text-[7px] font-bold uppercase tracking-wide`}
+                >
+                  {n.kind === "retracted" ? "Retracted" : "CASCADE"}
+                </text>
+              </g>
+            );
+          })
+        : null;
+
+    const otherDotsLabel =
+      placedDots.length > 0 ? (
+        <text
+          x={MARGIN_X}
+          y={dotsLabelY}
+          className="fill-slate-500 text-[9px] font-semibold uppercase tracking-[0.12em]"
+        >
+          Other citations ({placedDots.length}
+          {dotsOverflow > 0 ? ` of ${totalDotSources}` : ""})
+          {dotsOverflow > 0 ? " — cap for performance" : ""}
+        </text>
+      ) : null;
+
+    const flaggedLabel =
+      busGeom && busGeom.nodes.length > 0 ? (
+        <text
+          x={MARGIN_X}
+          y={busGeom.busY - 14}
+          className="fill-slate-400 text-[9px] font-semibold uppercase tracking-[0.12em]"
+        >
+          Flagged ({busGeom.nodes.length})
+        </text>
+      ) : null;
+
     return {
       viewW,
       viewH,
       hubCx,
-      flagged: busGeom,
-      dots: placedDots,
-      dotsLabelY,
+      segs,
+      dotCircles,
+      flaggedGroups,
+      otherDotsLabel,
+      flaggedLabel,
     };
-  }, [retracted, cascade, clean, unverified, other, filters]);
-
-  const segs: ReactNode[] = [];
-  if (flagged && flagged.nodes.length > 0) {
-    segs.push(
-      <line
-        key="spine"
-        x1={hubCx}
-        y1={HUB_BOTTOM}
-        x2={hubCx}
-        y2={flagged.busY}
-        stroke="rgba(148,163,184,0.4)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      />,
-    );
-    segs.push(
-      <line
-        key="bus"
-        x1={flagged.busLeft}
-        y1={flagged.busY}
-        x2={flagged.busRight}
-        y2={flagged.busY}
-        stroke="rgba(251,191,36,0.35)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      />,
-    );
-    flagged.nodes.forEach((n) => {
-      const st = STYLES[n.kind];
-      const midY = n.y + NODE_H_FLAG / 2;
-      const hi = highlightId === n.citation.id;
-      segs.push(
-        <line
-          key={`drop-${n.citation.id}`}
-          x1={n.x}
-          y1={flagged.busY}
-          x2={n.x}
-          y2={midY}
-          stroke={st.drop}
-          strokeWidth={hi ? 2.4 : 1.5}
-          strokeLinecap="round"
-          opacity={hi ? 1 : 0.92}
-        />,
-      );
-    });
-  }
+  }, [
+    retracted,
+    cascade,
+    clean,
+    unverified,
+    other,
+    filters,
+    highlightId,
+  ]);
 
   return (
     <div className="relative overflow-auto p-2 sm:p-4">
       <svg
-        viewBox={`0 0 ${viewW} ${viewH}`}
+        viewBox={`0 0 ${graph.viewW} ${graph.viewH}`}
         className="min-h-[280px] w-full"
         preserveAspectRatio="xMidYMin meet"
         role="img"
         aria-label="Citation contamination graph"
       >
         <defs>
-          <filter id="cg-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="5" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
           <filter id="cg-node-shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow
               dx="0"
@@ -592,7 +710,7 @@ function CompactGraphView(props: {
 
         <g filter="url(#cg-node-shadow)">
           <rect
-            x={hubCx - 72}
+            x={graph.hubCx - 72}
             y="10"
             width="144"
             height="48"
@@ -601,7 +719,7 @@ function CompactGraphView(props: {
             strokeWidth="1.5"
           />
           <text
-            x={hubCx}
+            x={graph.hubCx}
             y="38"
             textAnchor="middle"
             className="fill-amber-50 text-[12px] font-semibold"
@@ -610,104 +728,16 @@ function CompactGraphView(props: {
           </text>
         </g>
 
-        <g>{segs}</g>
+        <g>{graph.segs}</g>
 
-        {flagged && flagged.nodes.length > 0 ? (
-          <text
-            x={MARGIN_X}
-            y={flagged.busY - 14}
-            className="fill-slate-400 text-[9px] font-semibold uppercase tracking-[0.12em]"
-          >
-            Flagged ({flagged.nodes.length})
-          </text>
-        ) : null}
-
-        {dots.length > 0 ? (
-          <text
-            x={MARGIN_X}
-            y={dotsLabelY}
-            className="fill-slate-500 text-[9px] font-semibold uppercase tracking-[0.12em]"
-          >
-            Other citations ({dots.length})
-          </text>
-        ) : null}
-
-        {dots.map((d) => (
-          <circle
-            key={`dot-${d.citation.id}`}
-            cx={d.x}
-            cy={d.y}
-            r={highlightId === d.citation.id ? DOT_R + 1.5 : DOT_R}
-            className="fill-slate-500/55 stroke-slate-400/35"
-            strokeWidth="0.75"
-          />
-        ))}
-
-        {flagged
-          ? flagged.nodes.map((n) => {
-              const st = STYLES[n.kind];
-              const cid = n.citation.id;
-              const hi = highlightId === cid;
-              const nx = n.x - NODE_W_FLAG / 2;
-              const [line1, line2] = titleTwoLines(n.citation.title);
-              const viaFull = (n.citation.cascadeVia ?? "").trim();
-              const viaTip = viaFull ? `Via: ${viaFull}` : "Via: unknown upstream";
-              return (
-                <g key={cid} filter={hi ? "url(#cg-glow)" : "url(#cg-node-shadow)"}>
-                  {n.kind === "cascade" ? <title>{viaTip}</title> : null}
-                  <rect
-                    x={nx}
-                    y={n.y}
-                    width={NODE_W_FLAG}
-                    height={NODE_H_FLAG}
-                    rx="10"
-                    className={`${st.fill} ${st.stroke}`}
-                    strokeWidth={hi ? 2 : 1.2}
-                  />
-                  <text
-                    x={n.x}
-                    y={n.y + 14}
-                    textAnchor="middle"
-                    className={`${st.text} text-[8.5px] leading-tight`}
-                  >
-                    {line1}
-                  </text>
-                  {line2 ? (
-                    <text
-                      x={n.x}
-                      y={n.y + 25}
-                      textAnchor="middle"
-                      className={`${st.text} text-[8.5px] leading-tight`}
-                    >
-                      {line2}
-                    </text>
-                  ) : null}
-                  {n.kind === "cascade" ? (
-                    <text
-                      x={n.x}
-                      y={n.y + (line2 ? 36 : 28)}
-                      textAnchor="middle"
-                      className="fill-orange-200/75 text-[6.5px] leading-tight"
-                    >
-                      {`Via: ${truncateVia(n.citation.cascadeVia, 40)}`}
-                    </text>
-                  ) : null}
-                  <text
-                    x={n.x}
-                    y={n.y + (n.kind === "cascade" ? 50 : 46)}
-                    textAnchor="middle"
-                    className={`${st.subtext} text-[7px] font-bold uppercase tracking-wide`}
-                  >
-                    {n.kind === "retracted" ? "Retracted" : "CASCADE"}
-                  </text>
-                </g>
-              );
-            })
-          : null}
+        {graph.flaggedLabel}
+        {graph.otherDotsLabel}
+        {graph.dotCircles}
+        {graph.flaggedGroups}
       </svg>
     </div>
   );
-}
+});
 
 export function CascadeGraph({ citations, highlightId }: Props) {
   const list = citations ?? [];

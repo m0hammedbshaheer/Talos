@@ -26,7 +26,7 @@ function IntegrityScoreInner({ score, status }: Props) {
   useEffect(() => {
     if (isLoading) return;
     const target = score ?? 100;
-    const duration = 1200;
+    const duration = st === "complete" ? 420 : 900;
     const start = performance.now();
     const from = 0;
     let raf: number;

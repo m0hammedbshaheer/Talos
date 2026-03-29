@@ -52,7 +52,7 @@ export default function HomePage() {
       if (!hasConvexUrl()) {
         setLoading(false);
         setError(
-          "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan.",
+          "Add NEXT_PUBLIC_CONVEX_URL to .env.local (your hosted backend) to run a full scan.",
         );
         return;
       }
@@ -111,7 +111,7 @@ export default function HomePage() {
 
     if (!hasConvexUrl()) {
       setError(
-        "Set NEXT_PUBLIC_CONVEX_URL in .env.local to run a live scan.",
+        "Add NEXT_PUBLIC_CONVEX_URL to .env.local (your hosted backend) to run a full scan.",
       );
       return;
     }
@@ -190,16 +190,17 @@ export default function HomePage() {
               </h1>
               <p className="mx-auto mt-6 max-w-2xl text-center text-base leading-relaxed text-slate-300 sm:text-[1.05rem]">
                 Upload a PDF or paste references. We extract the bibliography, resolve
-                DOIs via CrossRef, check Retraction Watch data, scan citation cascades
-                via Semantic Scholar, and stream live progress from Convex.
+                DOIs via CrossRef, match them against the Retraction Watch database
+                (tens of thousands of public retraction records), scan cascades via
+                Semantic Scholar, and show live progress while the scan runs.
               </p>
             </section>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
               {[
-                "57,000+ retractions tracked",
+                "57K+ Retraction Watch records (reference index, not your upload)",
                 "Cascade contamination detection",
-                "Live Convex updates",
+                "Live scan progress",
               ].map((label) => (
                 <span
                   key={label}
@@ -224,12 +225,12 @@ export default function HomePage() {
                   {
                     icon: "🔍",
                     title: "We scan retraction data",
-                    body: "Powered by the Retraction Watch corpus plus CrossRef and Semantic Scholar.",
+                    body: "Each resolved reference is checked against the Retraction Watch index plus CrossRef and Semantic Scholar.",
                   },
                   {
                     icon: "📊",
                     title: "Get your integrity score",
-                    body: "Direct + cascade detection with replacement suggestions, streamed via Convex.",
+                    body: "Direct + cascade detection with replacement suggestions; results save online so you can return to them.",
                   },
                 ].map((s) => (
                   <div
@@ -505,8 +506,11 @@ export default function HomePage() {
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Data sources</p>
                   <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                    Powered by the <span className="text-slate-300">Retraction Watch</span> database —{" "}
-                    <span className="text-slate-300">57,393</span> records.
+                    Bibliographies are cross-checked against the public{" "}
+                    <span className="text-slate-300">Retraction Watch</span> corpus (
+                    <span className="text-slate-300">~57,393</span> retraction records in
+                    our index). That count is the size of the reference database — not your
+                    upload.
                   </p>
                 </div>
                 <div>

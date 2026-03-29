@@ -183,7 +183,6 @@ export async function POST(request: Request) {
           processedCount?: number;
           integrityScore?: number;
           paperTitle?: string;
-          historicalComparison?: unknown;
           downstreamRisk?: unknown;
         } = { jobId: convexJobId };
 
@@ -198,9 +197,6 @@ export async function POST(request: Request) {
           patch.integrityScore = u.integrityScore;
         }
         if (typeof u.paperTitle === "string") patch.paperTitle = u.paperTitle;
-        if (u.historicalComparison !== undefined) {
-          patch.historicalComparison = u.historicalComparison;
-        }
         if (u.downstreamRisk !== undefined) {
           patch.downstreamRisk = u.downstreamRisk;
         }

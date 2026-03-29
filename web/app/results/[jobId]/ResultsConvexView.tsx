@@ -15,9 +15,10 @@ export function ResultsConvexView({ jobId }: Props) {
   const jobDoc = useQuery(api.jobs.getJob, args);
   const citationsRaw = useQuery(api.citations.getCitationsForJob, args);
 
-  const loading =
-    Boolean(jobId) &&
-    (jobDoc === undefined || citationsRaw === undefined);
+  /** Job doc is small and fast; citations can be large — do not block the summary cards on citations. */
+  const jobLoading = Boolean(jobId) && jobDoc === undefined;
+  const citationsLoading =
+    Boolean(jobId) && jobDoc != null && citationsRaw === undefined;
 
   if (!jobId) {
     return (
@@ -30,7 +31,7 @@ export function ResultsConvexView({ jobId }: Props) {
     );
   }
 
-  if (loading) {
+  if (jobLoading) {
     return (
       <ResultsLayout
         jobId={jobId}
@@ -60,6 +61,7 @@ export function ResultsConvexView({ jobId }: Props) {
       jobId={jobId}
       job={job}
       citations={citations}
+      citationsLoading={citationsLoading}
       dataSource="convex"
     />
   );

@@ -1,4 +1,4 @@
-﻿/** Frontend-only demo payloads ΓÇö swap for Convex/API later without changing UI. */
+/** Frontend-only demo payloads ΓÇö swap for Convex/API later without changing UI. */
 
 export type CitationStatus =
   | "pending"
@@ -22,15 +22,11 @@ export interface MockCitation {
   cascadeVia?: string;
 }
 
-export interface HistoricalComparison {
-  matchedCase: string;
-  similarity: string;
-  avgMonthsToCatch: number;
-  impactDescription: string;
-  severity: string;
-}
-
 export interface DownstreamRisk {
+  retractedCount: number;
+  cascadeCount: number;
+  flaggedInBibliography: number;
+  totalReferences: number;
   estimatedDirectCitations: number;
   estimatedDownstreamPapers: number;
   worstCaseDownstream: number;
@@ -41,7 +37,6 @@ export interface DownstreamRisk {
 export interface MockJob {
   status: string;
   integrityScore: number;
-  historicalComparison: HistoricalComparison;
   downstreamRisk: DownstreamRisk;
   processedCount: number;
   totalCitations: number;
@@ -50,23 +45,19 @@ export interface MockJob {
 export const MOCK_JOB: MockJob = {
   status: "complete",
   integrityScore: 61,
-  totalCitations: 12,
-  processedCount: 12,
-  historicalComparison: {
-    matchedCase: "Surgisphere COVID-19 Studies",
-    similarity: "similar to",
-    avgMonthsToCatch: 2,
-    impactDescription:
-      "Halted global hydroxychloroquine trials, affected WHO policy",
-    severity: "critical",
-  },
+  totalCitations: 8,
+  processedCount: 8,
   downstreamRisk: {
-    estimatedDirectCitations: 12,
-    estimatedDownstreamPapers: 340,
-    worstCaseDownstream: 900,
-    riskLevel: "critical",
+    retractedCount: 1,
+    cascadeCount: 1,
+    flaggedInBibliography: 2,
+    totalReferences: 8,
+    estimatedDirectCitations: 24,
+    estimatedDownstreamPapers: 50,
+    worstCaseDownstream: 150,
+    riskLevel: "moderate",
     explanation:
-      "If your paper is published and cited 12 times, an estimated 340 downstream papers could inherit this contamination.",
+      "Your bibliography has 2 flagged references (1 retracted, 1 cascade). If this work is cited broadly, roughly 50 downstream papers could be exposed along citation chains (illustrative model).",
   },
 };
 

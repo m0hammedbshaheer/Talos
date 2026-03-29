@@ -3,6 +3,9 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pdf-parse"],
+  outputFileTracingExcludes: {
+    "*": ["./data/retraction_watch.csv"],
+  },
   outputFileTracingRoot: path.resolve(process.cwd(), ".."),
   // Proxy /api/* to the backend Next.js app running on port 3000
   async rewrites() {

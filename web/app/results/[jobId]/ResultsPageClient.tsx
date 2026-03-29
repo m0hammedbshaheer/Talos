@@ -16,7 +16,6 @@ export function ResultsPageClient({ jobId }: Props) {
     const job: JobViewModel = {
       status: MOCK_JOB?.status ?? undefined,
       integrityScore: MOCK_JOB?.integrityScore ?? undefined,
-      historicalComparison: MOCK_JOB?.historicalComparison,
       downstreamRisk: MOCK_JOB?.downstreamRisk,
     };
     return (
@@ -34,14 +33,14 @@ export function ResultsPageClient({ jobId }: Props) {
   if (!convexConfigured) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center bg-slate-950 px-4 text-center">
-        <p className="text-slate-200">Live results require Convex.</p>
+        <p className="text-slate-200">Saved results need the app backend URL.</p>
         <p className="mt-2 max-w-md text-sm text-slate-500">
-          Add{" "}
+          Set{" "}
           <code className="rounded bg-slate-800 px-1 py-0.5 text-slate-300">
             NEXT_PUBLIC_CONVEX_URL
           </code>{" "}
-          to <code className="text-slate-400">.env.local</code>, restart the dev
-          server, then run an analysis again.
+          in <code className="text-slate-400">.env.local</code> (your hosted backend),
+          restart the dev server, then run an analysis again.
         </p>
         {jobId ? (
           <p className="mt-4 font-mono text-xs text-slate-600">Job: {jobId}</p>

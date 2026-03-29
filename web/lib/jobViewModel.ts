@@ -4,7 +4,6 @@ import type { Doc } from "@/convex/_generated/dataModel";
 export type JobViewModel = {
   status?: string | null;
   integrityScore?: number | null;
-  historicalComparison?: unknown;
   downstreamRisk?: unknown;
 };
 
@@ -13,7 +12,6 @@ export function jobFromConvexDoc(doc: Doc<"jobs"> | null): JobViewModel | null {
   return {
     status: doc.status,
     integrityScore: doc.integrityScore,
-    historicalComparison: doc.historicalComparison,
     downstreamRisk: doc.downstreamRisk,
   };
 }

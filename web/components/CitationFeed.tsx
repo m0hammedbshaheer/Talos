@@ -319,7 +319,7 @@ export function CitationFeed({
                         {replacements.length === 0 ? (
                           <p className="text-xs text-slate-500">
                             No replacements stored yet — wait for analysis to
-                            finish or check Exa / Convex logs.
+                            finish or check server / Exa logs.
                           </p>
                         ) : (
                           replacements.map((r) => (

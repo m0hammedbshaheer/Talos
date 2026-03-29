@@ -8,7 +8,7 @@ type Props = {
 
 const steps = [
   "Extracting bibliography from PDF…",
-  "Checking 57,393 retraction records…",
+  "Cross-checking DOIs against Retraction Watch (~57K public records)…",
   "Detecting cascade contamination…",
   "Calculating integrity score…",
 ];
