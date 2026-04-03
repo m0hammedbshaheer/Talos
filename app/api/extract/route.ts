@@ -1,13 +1,14 @@
 // DOCUMENTATION NOTE:
-// This endpoint extracts references from PDFs and converts them into structured citations.
-// It accepts an uploaded PDF, pulls bibliography text, and asks an OpenAI-compatible LLM for JSON citations.
+// Extracts structured citations from an uploaded PDF via an OpenAI-compatible Chat API.
 
 import { loadLlmExtractConfig } from "@/lib/llmExtractConfig";
 import { NextResponse } from "next/server";
 import OpenAI, { APIError } from "openai";
-import { PDFParse } from "pdf-parse";
+import * as pdfParseModule from "pdf-parse";
 
 export const runtime = "nodejs";
+/** Vercel / long PDF extract — raise on Pro if scans time out (Hobby max is lower). */
+export const maxDuration = 120;
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const MIN_TEXT_LEN = 100;
@@ -19,6 +20,37 @@ const BIB_REGEX =
 
 const SYSTEM_PROMPT =
   "You are a scientific bibliography parser. Extract all references from the provided bibliography text. Return ONLY a valid JSON object with a 'citations' array. Each citation must have: { title: string, authors: string, year: number | null, doi: string | null }. If DOI not present, set to null. Return nothing except the JSON object.";
+
+type LegacyPdfParseFn = (buffer: Buffer) => Promise<{ text?: string }>;
+type ModernPdfParser = {
+  getText: () => Promise<{ text?: string }>;
+  destroy: () => Promise<void>;
+};
+type ModernPdfParseCtor = new (opts: { data: Buffer }) => ModernPdfParser;
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const mod = pdfParseModule as unknown as {
+    default?: LegacyPdfParseFn;
+    PDFParse?: ModernPdfParseCtor;
+  };
+
+  if (typeof mod.default === "function") {
+    const pdfData = await mod.default(buffer);
+    return (pdfData.text ?? "").trim();
+  }
+
+  if (typeof mod.PDFParse === "function") {
+    const parser = new mod.PDFParse({ data: buffer });
+    try {
+      const pdfData = await parser.getText();
+      return (pdfData.text ?? "").trim();
+    } finally {
+      await parser.destroy();
+    }
+  }
+
+  throw new Error("Unsupported pdf-parse module format");
+}
 
 function stripMarkdownFences(raw: string): string {
   let s = raw.trim();
@@ -74,13 +106,7 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     let text: string;
     try {
-      const parser = new PDFParse({ data: buffer });
-      try {
-        const pdfData = await parser.getText();
-        text = (pdfData.text ?? "").trim();
-      } finally {
-        await parser.destroy();
-      }
+      text = await extractPdfText(buffer);
     } catch (pdfErr) {
       console.error("[extract] pdf-parse failed", pdfErr);
       return jsonErrorBody(

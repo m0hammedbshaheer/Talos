@@ -1,5 +1,4 @@
-// DOCUMENTATION NOTE:
-// Exa is used to find replacement research papers.
+// DOCUMENTATION NOTE: Exa finds replacement research papers.
 
 import Exa from "exa-js";
 
@@ -11,10 +10,6 @@ export type ReplacementPaper = {
   relevanceScore: number | null;
 };
 
-/**
- * Search Exa for up to 3 papers that could replace or supersede work described by `query`.
- * Returns [] if the API key is missing, the query is empty, or the request fails.
- */
 export async function findReplacementPapers(
   query: string,
 ): Promise<ReplacementPaper[]> {

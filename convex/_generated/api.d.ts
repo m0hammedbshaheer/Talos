@@ -8,13 +8,21 @@
  * @module
  */
 
+import type * as citations from "../citations.js";
+import type * as jobs from "../jobs.js";
+import type * as replacements from "../replacements.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  citations: typeof citations;
+  jobs: typeof jobs;
+  replacements: typeof replacements;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.

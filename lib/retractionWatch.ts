@@ -1,13 +1,9 @@
-// DOCUMENTATION NOTE: This module is RetractWatch's local copy of the Retraction Watch
-// database. It reads a CSV of known retracted papers so the app can instantly tell whether
-// a DOI has been retracted—without calling the internet. Think of it as a spell-checker,
-// but for paper integrity.
+// DOCUMENTATION NOTE: Local Retraction Watch CSV lookup — no network calls.
 
 import fs from "fs";
 import path from "path";
 import Papa from "papaparse";
 
-/** Public retraction payload — field names are fixed for API consumers. */
 export interface RetractionRecord {
   retractionReason: string;
   retractionDate: string;
@@ -39,9 +35,13 @@ function normalizeDoi(doi: string): string {
 
 function csvPath(): string {
   try {
-    return path.join(process.cwd(), "data", "retraction_watch.csv");
+    const filePath = path.resolve(process.cwd(), "data", "retraction_watch.csv");
+    console.log("[retractionWatch] retraction_watch.csv path:", filePath);
+    return filePath;
   } catch {
-    return path.join(".", "data", "retraction_watch.csv");
+    const fallback = path.resolve(process.cwd(), "data", "retraction_watch.csv");
+    console.log("[retractionWatch] retraction_watch.csv path (fallback):", fallback);
+    return fallback;
   }
 }
 
@@ -122,10 +122,7 @@ function loadDatabase(): Map<string, RetractionRecord> {
   }
 }
 
-/**
- * Returns `null` if the DOI is not in the retraction database (treated as clean).
- * Returns the standardized retraction record if retracted.
- */
+/** Returns `null` if the DOI is not listed as retracted in the local CSV. */
 export function isRetracted(doi: string): RetractionRecord | null {
   try {
     const key = normalizeDoi(doi);

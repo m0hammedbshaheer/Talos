@@ -1,9 +1,10 @@
-// DOCUMENTATION NOTE: CrossRef is a nonprofit registry that links scholarly metadata
-// (titles, authors, DOIs) for millions of papers. We use it as a free "lookup desk":
-// when a user only has a reference title, we ask CrossRef for the best matching DOI so
-// RetractWatch can check that paper against retraction data.
+// DOCUMENTATION NOTE: CrossRef resolves titles to DOIs for downstream integrity checks.
 
 const MAILTO = "retractwatch@hackathon.dev";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export type ResolveDoiFromTitleResult = string | null;
 
@@ -11,6 +12,12 @@ export async function resolveDoiFromTitle(
   title: string,
   authors?: string,
 ): Promise<ResolveDoiFromTitleResult> {
+  try {
+    await sleep(50);
+  } catch {
+    /* continue */
+  }
+
   try {
     if (typeof title !== "string" || !title.trim()) return null;
 
@@ -22,6 +29,7 @@ export async function resolveDoiFromTitle(
 
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return null;
 

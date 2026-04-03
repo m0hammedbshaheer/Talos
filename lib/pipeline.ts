@@ -1,7 +1,11 @@
 // DOCUMENTATION NOTE:
 // Integrity pipeline: CrossRef → Retraction Watch CSV → Semantic Scholar → Exa.
-// Updates are injected (e.g. Convex); no database imports in this module.
+// Updates are injected (e.g. Convex). Phase 4 also persists replacements via Convex HTTP when URL is set.
 
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { mapPool } from "./asyncPool";
 import { resolveDoiFromTitle } from "./crossref";
 import { calculateDownstreamRisk } from "./downstreamRisk";
 import { findReplacementPapers } from "./exa";
@@ -17,7 +21,6 @@ import {
 import type {
   PipelineCitation,
   PipelineUpdateFns,
-  ReferenceRow,
   ReplacementRow,
   RetractionRecord,
 } from "./pipeline-types";
@@ -33,6 +36,12 @@ export type {
 
 /** @deprecated Use RetractionRecord */
 export type RetractionInfo = RetractionRecord;
+
+/** CrossRef + Semantic Scholar — stay under typical rate limits. */
+const POOL_DOI_RESOLVE = 6;
+const POOL_RETRACTION = 14;
+const POOL_CASCADE_FETCH = 4;
+const POOL_REPLACEMENTS = 4;
 
 // -----------------------------------------------------------------------------
 // External adapters (try/catch per call; safe fallbacks)
@@ -131,6 +140,9 @@ export async function runPipeline(
 ): Promise<{ citations: PipelineCitation[]; integrityScore: number }> {
   const { updateCitation, updateJob } = fns;
 
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL?.trim();
+  const convexClient = convexUrl ? new ConvexHttpClient(convexUrl) : null;
+
   const emitCitation = async (
     phase: string,
     data: Record<string, unknown> & { id: string },
@@ -163,198 +175,277 @@ export async function runPipeline(
     processedCount: 0,
   });
 
-  // Phase 1 — Resolve DOIs
-  await emitJob({ phase: 1, name: "resolve_dois" });
-  for (const c of citations) {
+  let integrityScore = 100;
+
+  const commitFinalJob = async (): Promise<number> => {
+    await emitJob({ phase: 5, name: "score_calculation" });
+    let score = 100;
     try {
-      c.status = "checking";
-      await emitCitation("doi_resolve_started", {
-        id: c.id,
+      score = scoreFromScoringTable(pipelineToScoringCitations(citations));
+    } catch {
+      score = 0;
+    }
+
+    const scoringRows = pipelineToScoringCitations(citations);
+    const hist = compareToHistoricalCases(
+      citations.map((c) => ({
+        retracted: c.status === "retracted",
+        cascade: c.status === "cascade" || c.status === "cascade-unknown",
+        retractionReason: c.retraction?.retractionReason,
+        journal: c.retraction?.retractionJournal,
         title: c.title,
-        status: c.status,
-      });
+        cascadeVia: c.cascadeVia,
+      })),
+      score,
+    );
+    const downstream = calculateDownstreamRisk(scoringRows);
+    const histPayload = historicalPayloadForJob(hist);
 
-      let doi = c.doi?.trim() || null;
-      if (!doi) {
-        doi = await resolveDoiFromTitleWrapper(c.title, c.authors);
-      }
+    await emitJob({
+      phase: 5,
+      integrityScore: score,
+      processedCount: citations.length,
+      status: "complete",
+      historicalComparison: histPayload,
+      downstreamRisk: downstream,
+      perCitation: citations.map((x) => ({
+        id: x.id,
+        status: x.status,
+        doi: x.doi,
+      })),
+    });
 
-      if (!doi) {
-        c.status = "unverified";
-        await emitCitation("doi_unresolved", {
+    await emitJob({
+      event: "pipeline_complete",
+      integrityScore: score,
+      status: "complete",
+      processedCount: citations.length,
+      historicalComparison: histPayload,
+      downstreamRisk: downstream,
+    });
+
+    return score;
+  };
+
+  try {
+    // Phase 1 — Resolve DOIs (parallel CrossRef)
+    await emitJob({ phase: 1, name: "resolve_dois" });
+    await mapPool(citations, POOL_DOI_RESOLVE, async (c) => {
+      try {
+        c.status = "checking";
+        await emitCitation("doi_resolve_started", {
           id: c.id,
           title: c.title,
           status: c.status,
         });
-        continue;
-      }
 
-      c.doi = doi;
-      c.status = "pending";
-      await emitCitation("doi_resolved", {
-        id: c.id,
-        title: c.title,
-        doi: c.doi,
-        status: c.status,
-      });
-    } catch {
-      c.status = "unverified";
-      await emitCitation("doi_error", {
-        id: c.id,
-        title: c.title,
-        status: c.status,
-      });
-    }
-  }
-
-  // Phase 2 — Check retractions
-  await emitJob({ phase: 2, name: "retraction_check" });
-  for (const c of citations) {
-    try {
-      if (c.status === "unverified" || !c.doi) {
-        continue;
-      }
-
-      c.status = "checking";
-      await emitCitation("retraction_check_started", {
-        id: c.id,
-        status: c.status,
-      });
-
-      const info = await isRetractedWrapper(c.doi);
-
-      if (info) {
-        c.retraction = info;
-        c.status = "retracted";
-        await emitCitation("retracted", {
-          id: c.id,
-          retraction: info,
-          status: c.status,
-        });
-      } else {
-        c.retraction = null;
-        c.status = "clean";
-        await emitCitation("not_retracted", {
-          id: c.id,
-          status: c.status,
-        });
-      }
-    } catch {
-      c.retraction = null;
-      c.status = "unverified";
-      await emitCitation("retraction_check_error", {
-        id: c.id,
-        status: c.status,
-      });
-    }
-  }
-
-  // Phase 3 — Cascade detection
-  await emitJob({ phase: 3, name: "cascade_detection" });
-  for (const c of citations) {
-    try {
-      if (c.status === "retracted" || c.status === "unverified" || !c.doi) {
-        continue;
-      }
-
-      c.status = "checking";
-      await emitCitation("cascade_check_started", {
-        id: c.id,
-        status: c.status,
-      });
-
-      const scholar = await getReferencesWrapper(c.doi);
-
-      if (!scholar.ok) {
-        c.references = [];
-        c.status = "cascade-unknown";
-        c.cascadeVia =
-          "Semantic Scholar reference list could not be loaded; cascade status unknown.";
-        console.log("[pipeline] cascade-unknown (API did not return usable data)", {
-          citationId: c.id,
-          paperTitle: c.title,
-          doi: c.doi,
-          message: scholar.message,
-          rateLimited: scholar.rateLimited,
-          statusCode: scholar.statusCode,
-        });
-        await emitCitation("cascade_unknown", {
-          id: c.id,
-          status: c.status,
-          cascadeVia: c.cascadeVia,
-        });
-        continue;
-      }
-
-      const refs = scholar.references;
-      c.references = refs;
-
-      let cascaded = false;
-      let cascadeViaRef: ReferenceRow | null = null;
-      for (const ref of refs) {
-        const refRet = await isRetractedWrapper(ref.doi);
-        if (refRet) {
-          cascaded = true;
-          cascadeViaRef = ref;
-          break;
+        let doi = c.doi?.trim() || null;
+        if (!doi) {
+          doi = await resolveDoiFromTitleWrapper(c.title, c.authors);
         }
-      }
 
-      if (cascaded) {
-        c.status = "cascade";
-        const viaLabel =
-          cascadeViaRef?.title?.trim() ||
-          cascadeViaRef?.doi ||
-          "retracted upstream reference";
-        c.cascadeVia = viaLabel;
-        console.log("[pipeline] cascade detected", {
-          citationId: c.id,
-          paperTitle: c.title,
-          citingDoi: c.doi,
-          upstreamRetractedDoi: cascadeViaRef?.doi,
-          upstreamTitle: cascadeViaRef?.title,
-          refsChecked: refs.length,
-        });
-        await emitCitation("cascade", {
+        if (!doi) {
+          c.status = "unverified";
+          await emitCitation("doi_unresolved", {
+            id: c.id,
+            title: c.title,
+            status: c.status,
+          });
+          return;
+        }
+
+        c.doi = doi;
+        c.status = "pending";
+        await emitCitation("doi_resolved", {
           id: c.id,
-          references: refs,
+          title: c.title,
+          doi: c.doi,
           status: c.status,
-          cascadeVia: c.cascadeVia,
         });
-      } else {
-        c.status = "clean";
-        c.cascadeVia = undefined;
-        await emitCitation("no_cascade", { id: c.id, status: c.status });
+      } catch {
+        c.status = "unverified";
+        await emitCitation("doi_error", {
+          id: c.id,
+          title: c.title,
+          status: c.status,
+        });
       }
-    } catch {
-      c.status = "unverified";
-      await emitCitation("cascade_check_error", {
-        id: c.id,
-        status: c.status,
-      });
-    }
-  }
+    });
 
-  // Phase 4 — Replacement suggestions
-  await emitJob({ phase: 4, name: "replacement_suggestions" });
-  for (const c of citations) {
+    // Phase 2 — Retraction Watch (parallel; CSV is in-memory after first load)
+    await emitJob({ phase: 2, name: "retraction_check" });
+    const phase2Targets = citations.filter(
+      (c) => c.status !== "unverified" && Boolean(c.doi?.trim()),
+    );
+    await mapPool(phase2Targets, POOL_RETRACTION, async (c) => {
+      try {
+        c.status = "checking";
+        await emitCitation("retraction_check_started", {
+          id: c.id,
+          status: c.status,
+        });
+
+        const info = await isRetractedWrapper(c.doi!);
+
+        if (info) {
+          c.retraction = info;
+          c.status = "retracted";
+          await emitCitation("retracted", {
+            id: c.id,
+            retraction: info,
+            status: c.status,
+          });
+        } else {
+          c.retraction = null;
+          c.status = "clean";
+          await emitCitation("not_retracted", {
+            id: c.id,
+            status: c.status,
+          });
+        }
+      } catch {
+        c.retraction = null;
+        c.status = "unverified";
+        await emitCitation("retraction_check_error", {
+          id: c.id,
+          status: c.status,
+        });
+      }
+    });
+
+    // Phase 3 — Cascade (parallel S2 fetches; parallel RW checks per paper)
+    await emitJob({ phase: 3, name: "cascade_detection" });
+    const phase3Targets = citations.filter(
+      (c) =>
+        c.status !== "retracted" &&
+        c.status !== "unverified" &&
+        Boolean(c.doi?.trim()),
+    );
+    await mapPool(phase3Targets, POOL_CASCADE_FETCH, async (c) => {
+      try {
+        c.status = "checking";
+        await emitCitation("cascade_check_started", {
+          id: c.id,
+          status: c.status,
+        });
+
+        const scholar = await getReferencesWrapper(c.doi!);
+
+        if (!scholar.ok) {
+          c.references = [];
+          c.status = "cascade-unknown";
+          c.cascadeVia =
+            "Semantic Scholar reference list could not be loaded; cascade status unknown.";
+          console.log("[pipeline] cascade-unknown (API did not return usable data)", {
+            citationId: c.id,
+            paperTitle: c.title,
+            doi: c.doi,
+            message: scholar.message,
+            rateLimited: scholar.rateLimited,
+            statusCode: scholar.statusCode,
+          });
+          await emitCitation("cascade_unknown", {
+            id: c.id,
+            status: c.status,
+            cascadeVia: c.cascadeVia,
+          });
+          return;
+        }
+
+        const refs = scholar.references;
+        c.references = refs;
+
+        const refChecks = await Promise.all(
+          refs.map(async (ref) => ({
+            ref,
+            ret: await isRetractedWrapper(ref.doi),
+          })),
+        );
+        const hit = refChecks.find((x) => x.ret);
+
+        if (hit?.ret) {
+          const cascadeViaRef = hit.ref;
+          c.status = "cascade";
+          const viaLabel =
+            cascadeViaRef.title?.trim() ||
+            cascadeViaRef.doi ||
+            "retracted upstream reference";
+          c.cascadeVia = viaLabel;
+          console.log("[pipeline] cascade detected", {
+            citationId: c.id,
+            paperTitle: c.title,
+            citingDoi: c.doi,
+            upstreamRetractedDoi: cascadeViaRef.doi,
+            upstreamTitle: cascadeViaRef.title,
+            refsChecked: refs.length,
+          });
+          await emitCitation("cascade", {
+            id: c.id,
+            references: refs,
+            status: c.status,
+            cascadeVia: c.cascadeVia,
+          });
+        } else {
+          c.status = "clean";
+          c.cascadeVia = undefined;
+          await emitCitation("no_cascade", { id: c.id, status: c.status });
+        }
+      } catch {
+        c.status = "unverified";
+        await emitCitation("cascade_check_error", {
+          id: c.id,
+          status: c.status,
+        });
+      }
+    });
+
+    // Phase 4 — Replacement suggestions (parallel Exa)
+    await emitJob({ phase: 4, name: "replacement_suggestions" });
+    const phase4Targets = citations.filter(
+      (c) => c.status === "retracted" || c.status === "cascade",
+    );
+    await mapPool(phase4Targets, POOL_REPLACEMENTS, async (c) => {
+      try {
+        const replacements = await findReplacementPapersWrapper(c.title, c.year);
+        c.replacements = replacements;
+        if (convexClient) {
+          for (const r of replacements) {
+            try {
+              await convexClient.mutation(api.replacements.createReplacement, {
+                citationId: c.id as Id<"citations">,
+                title: r.title,
+                url: r.url,
+                summary: r.summary ?? "",
+                publishedDate: r.publishedDate?.trim() || "Unknown",
+                relevanceScore: r.relevanceScore ?? 0.5,
+              });
+            } catch (err) {
+              console.error("[pipeline] createReplacement failed", c.id, err);
+            }
+          }
+        }
+        await emitCitation("replacements", {
+          id: c.id,
+          replacements,
+          status: c.status,
+        });
+      } catch {
+        c.replacements = [];
+        await emitCitation("replacements_error", { id: c.id, status: c.status });
+      }
+    });
+  } catch (fatal) {
+    console.error("[pipeline] fatal error mid-run — still finalizing job", fatal);
+  } finally {
     try {
-      if (c.status !== "retracted" && c.status !== "cascade") {
-        continue;
-      }
-      const replacements = await findReplacementPapersWrapper(c.title, c.year);
-      c.replacements = replacements;
-      await emitCitation("replacements", {
-        id: c.id,
-        replacements,
-        status: c.status,
-      });
-    } catch {
-      c.replacements = [];
-      await emitCitation("replacements_error", { id: c.id, status: c.status });
+      integrityScore = await commitFinalJob();
+    } catch (finalizeErr) {
+      console.error("[pipeline] commitFinalJob failed", finalizeErr);
     }
   }
 
+<<<<<<< HEAD
+=======
   // Phase 5 — Score calculation + analytics for job row
   await emitJob({ phase: 5, name: "score_calculation" });
   let integrityScore = 100;
@@ -388,6 +479,7 @@ export async function runPipeline(
     downstreamRisk: downstream,
   });
 
+>>>>>>> 747d616 (fix: exclude CSV from build bundle)
   return { citations, integrityScore };
 }
 

@@ -27,6 +27,17 @@ export type GetReferencesResult =
     };
 
 const RETRY_DELAY_MS = 2000;
+const FETCH_TIMEOUT_MS = 25_000;
+
+function scholarHeaders(): Record<string, string> {
+  const h: Record<string, string> = {
+    Accept: "application/json",
+    "User-Agent": "RetractWatch/1.0 (bibliography integrity; mailto:retractwatch@hackathon.dev)",
+  };
+  const key = process.env.SEMANTIC_SCHOLAR_API_KEY?.trim();
+  if (key) h["x-api-key"] = key;
+  return h;
+}
 
 async function fetchReferencesOnce(doi: string): Promise<GetReferencesResult> {
   const doiTrim = typeof doi === "string" ? doi.trim() : "";
@@ -56,7 +67,10 @@ async function fetchReferencesOnce(doi: string): Promise<GetReferencesResult> {
 
   let res: Response;
   try {
-    res = await fetch(u.toString(), { headers: { Accept: "application/json" } });
+    res = await fetch(u.toString(), {
+      headers: scholarHeaders(),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, message: `Fetch failed: ${msg}` };

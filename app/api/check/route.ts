@@ -1,29 +1,67 @@
 // DOCUMENTATION NOTE:
-// Awaits the full pipeline synchronously and returns all results in one response.
-// Frontend stores the payload in sessionStorage so the results page can render
-// without Convex being configured.
+// Creates Convex job + citations, returns immediately, runs pipeline in background.
 
-import { NextResponse } from "next/server";
-import { runPipeline, type PipelineCitation } from "@/lib/pipeline";
+import { ConvexHttpClient } from "convex/browser";
+import { after, NextResponse } from "next/server";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import {
+  runPipeline,
+  type PipelineCitation,
+  type RetractionRecord,
+} from "@/lib/pipeline";
 
 export const runtime = "nodejs";
+/**
+ * Integrity pipeline (CrossRef, RW CSV, Semantic Scholar, optional Exa).
+ * Requires Vercel Pro (or Fluid / high duration) for large bibliographies — Hobby often caps at 60s.
+ */
+export const maxDuration = 300;
 
-function normalizeCitations(raw: unknown): PipelineCitation[] {
+function coerceYear(y: unknown): number | undefined {
+  if (y == null) return undefined;
+  if (typeof y === "number" && !Number.isNaN(y)) return y;
+  const n = Number(y);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+type IncomingRow = {
+  title: string;
+  authors: string;
+  year?: number;
+  doi?: string;
+};
+
+function normalizeBodyCitations(raw: unknown): IncomingRow[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((item, i) => {
     const o = item as Record<string, unknown>;
+    const title =
+      typeof o.title === "string" && o.title.trim()
+        ? o.title.trim()
+        : `Untitled reference ${i + 1}`;
+    const authors =
+      typeof o.authors === "string" && o.authors.trim()
+        ? o.authors.trim()
+        : "Unknown";
     return {
-      id: typeof o.id === "string" && o.id ? o.id : `c${i + 1}`,
-      title: typeof o.title === "string" ? o.title : "",
-      year: o.year as number | string | undefined,
-      doi: typeof o.doi === "string" ? o.doi : undefined,
-      authors: typeof o.authors === "string" ? o.authors : undefined,
-      status: "pending" as const,
+      title,
+      authors,
+      year: coerceYear(o.year),
+      doi: typeof o.doi === "string" && o.doi.trim() ? o.doi.trim() : undefined,
     };
   });
 }
 
 export async function POST(request: Request) {
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  if (!convexUrl?.trim()) {
+    return NextResponse.json(
+      { error: "NEXT_PUBLIC_CONVEX_URL is not configured" },
+      { status: 503 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -32,63 +70,154 @@ export async function POST(request: Request) {
   }
 
   const citationsRaw =
-    body &&
-    typeof body === "object" &&
-    body !== null &&
-    "citations" in body
+    body && typeof body === "object" && body !== null && "citations" in body
       ? (body as { citations: unknown }).citations
       : undefined;
 
-  if (!Array.isArray(citationsRaw)) {
+  if (!Array.isArray(citationsRaw) || citationsRaw.length === 0) {
     return NextResponse.json(
-      { error: "Expected JSON body: { citations: [...] }" },
+      { error: "Expected JSON body: { citations: [...] } with at least one row" },
       { status: 400 },
     );
   }
 
-  const jobId = "job_" + Date.now();
-  const citations = normalizeCitations(citationsRaw);
+  const rows = normalizeBodyCitations(citationsRaw);
+  const paperTitle =
+    body && typeof body === "object" && body !== null && "paperTitle" in body
+      ? String((body as { paperTitle?: unknown }).paperTitle ?? "").trim() ||
+        undefined
+      : undefined;
 
-  // Collect job-level metadata emitted by the pipeline
-  const jobMeta: Record<string, unknown> = {};
+  const client = new ConvexHttpClient(convexUrl);
 
+  // Each POST creates a new Convex job id — there is no reuse/cache by PDF content.
+  let convexJobId: Id<"jobs">;
   try {
-    const result = await runPipeline(jobId, citations, {
-      updateCitation: async () => {
-        // no-op: full citation data is returned directly in result.citations
-      },
-      updateJob: async (updates) => {
-        Object.assign(jobMeta, updates);
-      },
+    convexJobId = await client.mutation(api.jobs.createJob, {
+      status: "running",
+      totalCitations: rows.length,
+      processedCount: 0,
+      createdAt: Date.now(),
+      paperTitle,
     });
-
-    // Flatten retraction sub-object onto each citation for the frontend
-    const flatCitations = result.citations.map((c) => ({
-      id: c.id,
-      title: c.title,
-      authors: c.authors ?? "",
-      year: c.year ?? null,
-      doi: c.doi ?? null,
-      status: c.status,
-      retractionReason: c.retraction?.retractionReason ?? null,
-      retractionDate: c.retraction?.retractionDate ?? null,
-      retractionCountry: c.retraction?.retractionCountry ?? null,
-      retractionJournal: c.retraction?.retractionJournal ?? null,
-    }));
-
-    return NextResponse.json({
-      jobId,
-      status: "complete",
-      integrityScore: result.integrityScore,
-      historicalComparison: jobMeta.historicalComparison ?? null,
-      downstreamRisk: jobMeta.downstreamRisk ?? null,
-      citations: flatCitations,
-    });
-  } catch (err) {
-    console.error("[check pipeline]", jobId, err);
+  } catch (e) {
+    console.error("[check] createJob failed", e);
     return NextResponse.json(
-      { error: "Pipeline failed. Check server logs." },
+      { error: "Failed to create analysis job" },
       { status: 500 },
     );
   }
+
+  const pipelineCitations: PipelineCitation[] = [];
+
+  for (const row of rows) {
+    try {
+      const citationId = await client.mutation(api.citations.createCitation, {
+        jobId: convexJobId,
+        title: row.title,
+        authors: row.authors,
+        year: row.year,
+        doi: row.doi,
+        status: "pending",
+      });
+
+      pipelineCitations.push({
+        id: String(citationId),
+        title: row.title,
+        authors: row.authors,
+        year: row.year,
+        doi: row.doi,
+        status: "pending",
+      });
+    } catch (e) {
+      console.error("[check] createCitation failed", e);
+      return NextResponse.json(
+        { error: "Failed to save citations" },
+        { status: 500 },
+      );
+    }
+  }
+
+  const jobIdStr = String(convexJobId);
+
+  after(async () => {
+    try {
+      await runPipeline(jobIdStr, pipelineCitations, {
+        updateCitation: async (citationId, updates) => {
+      const u = updates as Record<string, unknown>;
+      try {
+        const patch: {
+          citationId: Id<"citations">;
+          title?: string;
+          authors?: string;
+          year?: number;
+          doi?: string;
+          status?: string;
+          retractionReason?: string;
+          retractionDate?: string;
+          retractionCountry?: string;
+          retractionJournal?: string;
+          cascadeVia?: string;
+        } = { citationId: citationId as Id<"citations"> };
+
+        if (typeof u.status === "string") patch.status = u.status;
+        if (typeof u.doi === "string") patch.doi = u.doi;
+        if (typeof u.title === "string") patch.title = u.title;
+        if (typeof u.authors === "string") patch.authors = u.authors;
+        if (typeof u.cascadeVia === "string") patch.cascadeVia = u.cascadeVia;
+
+        const ret = u.retraction;
+        if (ret && typeof ret === "object") {
+          const r = ret as RetractionRecord;
+          patch.retractionReason = r.retractionReason;
+          patch.retractionDate = r.retractionDate;
+          patch.retractionCountry = r.retractionCountry;
+          patch.retractionJournal = r.retractionJournal;
+        }
+
+        await client.mutation(api.citations.updateCitation, patch);
+      } catch (err) {
+        console.error("[check] updateCitation", citationId, err);
+      }
+    },
+    updateJob: async (payload) => {
+      const u = payload as Record<string, unknown>;
+      try {
+        const patch: {
+          jobId: Id<"jobs">;
+          status?: string;
+          totalCitations?: number;
+          processedCount?: number;
+          integrityScore?: number;
+          paperTitle?: string;
+          downstreamRisk?: unknown;
+        } = { jobId: convexJobId };
+
+        if (typeof u.status === "string") patch.status = u.status;
+        if (typeof u.totalCitations === "number") {
+          patch.totalCitations = u.totalCitations;
+        }
+        if (typeof u.processedCount === "number") {
+          patch.processedCount = u.processedCount;
+        }
+        if (typeof u.integrityScore === "number") {
+          patch.integrityScore = u.integrityScore;
+        }
+        if (typeof u.paperTitle === "string") patch.paperTitle = u.paperTitle;
+        if (u.downstreamRisk !== undefined) {
+          patch.downstreamRisk = u.downstreamRisk;
+        }
+
+        await client.mutation(api.jobs.updateJob, patch);
+      } catch (err) {
+        console.error("[check] updateJob", err);
+      }
+    },
+      });
+    } catch (err) {
+      console.error("[check] pipeline", jobIdStr, err);
+    }
+  });
+
+  return NextResponse.json({ jobId: jobIdStr });
 }

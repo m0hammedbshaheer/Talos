@@ -1,46 +1,36 @@
 {
-  "name": "mosin_work",
+  "name": "web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node --max-old-space-size=4096 ./node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:db": "tsx scripts/testDatabase.ts",
-    "test:crossref": "tsx scripts/testCrossref.ts",
-    "test:cascade": "tsx scripts/testCascade.ts",
-    "test:scoring": "tsx scripts/testScoring.ts",
-    "test:db:node": "ts-node scripts/testDatabase.ts",
-    "test:crossref:node": "ts-node scripts/testCrossref.ts",
-    "test:cascade:node": "ts-node scripts/testCascade.ts",
-    "test:scoring:node": "ts-node scripts/testScoring.ts"
+    "convex": "convex dev",
+    "convex:codegen": "convex codegen"
   },
   "dependencies": {
-    "@types/d3": "^7.4.3",
-    "@types/papaparse": "^5.5.2",
-    "convex": "^1.34.1",
-    "d3": "^7.9.0",
+    "convex": "^1.17.4",
     "exa-js": "^2.10.2",
-    "jspdf": "^4.2.1",
-    "next": "16.2.1",
-    "openai": "^6.33.0",
-    "papaparse": "^5.5.3",
-    "pdf-parse": "^2.4.5",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "react-dropzone": "^15.0.0"
+    "next": "^16.2.1",
+    "openai": "^4.77.0",
+    "papaparse": "^5.5.2",
+    "pdf-parse": "^1.1.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/papaparse": "^5.3.15",
+    "@types/pdf-parse": "^1.1.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.1",
+    "eslint-config-next": "15.5.4",
     "tailwindcss": "^4",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

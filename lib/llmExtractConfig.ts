@@ -1,18 +1,14 @@
 /**
- * PDF extract uses the OpenAI-compatible Chat Completions API.
- * Set LLM_* (or OPENAI_*) for OpenAI, Groq, NVIDIA NIM, xAI Grok, etc.
+ * PDF/paste extract — OpenAI-compatible Chat Completions API.
+ * Keep in sync with `Talos/lib/llmExtractConfig.ts` (monorepo sibling).
  */
 
 export type LlmExtractConfig = {
   apiKey: string;
-  /** Omit for default OpenAI (https://api.openai.com/v1). */
   baseURL?: string;
   model: string;
-  /** If false, skip response_format json_object (some OpenAI-compatible hosts reject it). */
   jsonMode: boolean;
-  /** Max tokens for the completion (Groq console often uses 8192). */
   maxCompletionTokens: number;
-  /** Groq `openai/gpt-oss-*` etc.: optional `reasoning_effort` (LLM_REASONING_EFFORT). */
   reasoningEffort?: "low" | "medium" | "high";
 };
 
@@ -27,7 +23,7 @@ export function loadLlmExtractConfig():
     return {
       ok: false,
       error:
-        "No LLM API key. Set LLM_API_KEY or OPENAI_API_KEY in .env.local. For Groq / NVIDIA / xAI, also set LLM_BASE_URL and LLM_MODEL (see .env.local.example). Restart the dev server after changes.",
+        "No LLM API key. Set LLM_API_KEY or OPENAI_API_KEY in Vercel env (or .env.local). For Groq / NVIDIA / xAI, also set LLM_BASE_URL and LLM_MODEL.",
     };
   }
 
